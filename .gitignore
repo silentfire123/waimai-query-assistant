@@ -1,0 +1,11 @@
+output/
+data/
+local-config.json
+*-private.json
+.env
+.env.*
+!.env.example
+node_modules/
+*.log
+*.tmp
+.impeccable/

@@ -1,0 +1,9 @@
+{
+  "name": "waimai-query-assistant",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "外卖查询助手：小蚕美团比例返与实付满返的只读名单比对",
+  "engines": { "node": ">=22" },
+  "scripts": { "start": "node server.mjs", "test": "node --test test/*.test.mjs", "poc": "node poc.mjs" }
+}

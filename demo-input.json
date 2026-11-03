@@ -1,0 +1,16 @@
+{
+  "_demo": true,
+  "notice": "全部是虚构演示数据，只验证逻辑，不代表真实活动",
+  "full": { "status": {"code": 0}, "promotion_list": [
+    {"promotion_id":"f1","store":{"store_id":"xc1","name":"演示饭店（高新店）","wm_poi_id":"mt100"},"meituan_status":1,"meituan_order_money":3000,"meituan_user_rebate":2000,"meituan_left_number":5,"rebate_condition":99},
+    {"promotion_id":"f2","store":{"store_id":"xc2","name":"演示面馆（南门店）"},"meituan_status":1,"meituan_order_money":2500,"meituan_user_rebate":1200,"meituan_left_number":3,"rebate_condition":2},
+    {"promotion_id":"f3","store":{"store_id":"xc3","name":"演示饭店（北门店）"},"meituan_status":1,"meituan_order_money":3000,"meituan_user_rebate":1000,"meituan_left_number":5},
+    {"promotion_id":"f4","store":{"store_id":"xc4","name":"演示售罄店"},"meituan_status":1,"meituan_order_money":2000,"meituan_user_rebate":1000,"meituan_left_number":0},
+    {"promotion_id":"f5","store":{"store_id":"xc5","name":"演示非美团店"},"meituan_status":0,"meituan_order_money":2000,"meituan_user_rebate":1000,"meituan_left_number":4}
+  ]},
+  "ratio": { "status": {"code": 0}, "list": [
+    {"name":"演示饭店（高新店）","wm_poi_id":"mt100","plan_activity_info_list":[{"poi_event_id":"r1","ratio":600,"max_commission":1000,"inventory":8,"plan_activity_type":1}]},
+    {"name":"演示面馆(南门店)","wm_poi_id":"mt200","plan_activity_info_list":[{"poi_event_id":"r2","ratio":1500,"max_commission":2000,"inventory":3,"plan_activity_type":2}]},
+    {"name":"演示售罄店","wm_poi_id":"mt300","plan_activity_info_list":[{"poi_event_id":"r3","ratio":1000,"max_commission":2000,"inventory":2,"plan_activity_type":1}]}
+  ]}
+}
