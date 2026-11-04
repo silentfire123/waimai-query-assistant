@@ -199,3 +199,16 @@ https://raw.githubusercontent.com/lyrric/xiaochan/main/src/main/java/io/github/x
 - pagination 字段记录计划页数、请求次数、不同内容页、重复响应、各层条数、schemaRejectedItems、每次新增店数和停止原因；不包含地址、商家 ID、原始游标或会话标识。各层条数统计每个成功解析响应，包括重复响应，门店数为跨响应去重值。
 - 默认五页、上限十页、十秒冷却、串行请求、WAF 后立即停止均保留。没有靠加页或扩大单页条数修复。
 - 本次核对了 GitHub main 的 XiaochanHttp.java（2026-11-04 读取），其请求形状与本项目一致；D:/zcode-worker/research/xiaochan 本地副本实际仍是旧版本，不能作为现行协议证据。上游参考也逐次生成会话 ID，说明不能只复制参考实现就认为分页正确。
+
+
+## 2026-11-04 红字误报：商品记录被误判为满返数据损坏（19:03 后）
+
+用户截图为 18:34:57 的网页结果：满返 38 家／比例返 25 家，第四次满返响应两条 INVALID_FEED_ITEMS。此错误来自上一轮新增的严格金额校验，而不是网络故障或分页回退。
+
+重新检查本机留存的第四次原始响应：两条都存在完整 store.name、user_rebate、left_number，唯一缺少的必填字段为 order_money。它们都带 store_product.product_type=1、商品名称、detail.jump_product_id、sku_price 及 full_discount_price，属于可识别的商品详情记录。商品价格存在不代表它等于实付满返门槛。前轮“异常满返金额缺失”的概括过宽，应改为混合 feed 的活动结构未细分。
+
+修复仅识别狭窄结构：无 order_money（null/缺字段）、有门店名称和可解析返现金额、product_type=1、有非空商品名称和有效商品 ID、正数 sku_price。符合时从满返范围排除，累计 excludedProductItems，并在普通覆盖提示中说明；不补零、不把 sku_price/full_discount_price 当作满返金额、不加入商品活动到满返交集。其余缺门店/缺返现/损坏金额/未知商品结构仍记录 INVALID_FEED_ITEMS 和 partial。
+
+离线逐类回放已有真实响应（满返四次／比例返四次）：修复前 33／20 家、partial、两条误报；修复后仍 33／20 家、errors=[]、no_overlap_in_sample，明确排除商品活动 2 条。没有新增上游查询，也没有将旧响应伪装为新实时结果。先前五页实测数字与 partial 状态保留为历史观察。
+
+网页隔离回放（虚构位置，source=imported-unverified）验证：结束提示为“查询完成，结果已保存在本机”，没有采集错误，覆盖提示含“另有 2 条商品活动未提供实付门槛，未纳入满返比对”。真实用户服务仍持有旧代码/旧报告，需正常重启后手动重新查询才会更新；没有终止用户的 node server.mjs --open 进程，也没有篡改 18:34 历史缓存。

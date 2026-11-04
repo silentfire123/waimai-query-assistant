@@ -218,3 +218,67 @@ test('有效分页：单条满返缺少 store 时仍保留同页合法活动', a
   assert.equal(report.counts.fullStores,1);assert.equal(report.status,'partial');
   assert.equal(report.pagination.full.schemaRejectedItems,1);
 });
+
+const productPromotion = (key, overrides = {}) => {
+  const item = { ...feedStore(key), store_product: { name:'测试套餐', product_type:1,
+    detail:{jump_product_id:'123456',sku_price:'17.6',full_discount_price:'15.1'} }, ...overrides };
+  delete item.order_money;
+  return item;
+};
+test('商品活动：无满返门槛且有完整商品信息的条目单独排除，不误报采集失败', async t => {
+  const original=globalThis.fetch;
+  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
+    ?{feed_items:[feedStore('valid'),productPromotion('product-a'),productPromotion('product-b')]}
+    :{list:[]});
+  t.after(()=>{globalThis.fetch=original;});
+  const report=buildReport(await queryLive(1,{location,log:()=>{}}));
+  assert.deepEqual(report.errors,[],'商品价格不是实付满返门槛，已识别商品活动应按范围排除');
+  assert.equal(report.status,'no_overlap_in_sample');assert.equal(report.counts.fullStores,1);
+  assert.equal(report.fullStores[0].activities[0].minPay,30,'不能用商品价格补写满返门槛');
+  assert.equal(report.pagination.full.excludedProductItems,2);
+  assert.equal(report.pagination.full.classifiedItems,1);
+  assert.equal(report.pagination.full.schemaRejectedItems,0);
+  assert.ok(report.notes.some(n=>n.includes('商品活动')&&n.includes('2')));
+});
+
+test('商品活动：商品信息不能掩盖缺门店、缺返现或损坏金额等真实异常', async t => {
+  const missingStore=productPromotion('no-store',{store:undefined});
+  const missingRebate=productPromotion('no-rebate',{user_rebate:undefined});
+  const damagedMoney={...productPromotion('bad-money'),order_money:'not-a-number'};
+  const missingProductId=productPromotion('no-product-id');delete missingProductId.store_product.detail.jump_product_id;
+  const missingPrice=productPromotion('no-price');delete missingPrice.store_product.detail.sku_price;
+  const unknownType=productPromotion('unknown-type');unknownType.store_product.product_type=99;
+  const original=globalThis.fetch;
+  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
+    ?{feed_items:[feedStore('valid'),missingStore,missingRebate,damagedMoney,missingProductId,missingPrice,unknownType]}
+    :{list:[]});
+  t.after(()=>{globalThis.fetch=original;});
+  const report=buildReport(await queryLive(1,{location,log:()=>{}}));
+  assert.equal(report.status,'partial');assert.equal(report.counts.fullStores,1);
+  assert.equal(report.pagination.full.excludedProductItems,0);
+  assert.equal(report.pagination.full.schemaRejectedItems,6);
+  assert.equal(report.errors[0].code,'INVALID_FEED_ITEMS');
+});
+test('商品活动：有明确实付满返门槛时仍保留，商品价不覆盖门槛', async t => {
+  const item={...productPromotion('with-threshold'),order_money:3000};
+  const original=globalThis.fetch;
+  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'?{feed_items:[item]}:{list:[]});
+  t.after(()=>{globalThis.fetch=original;});
+  const report=buildReport(await queryLive(1,{location,log:()=>{}}));
+  assert.deepEqual(report.errors,[]);assert.equal(report.counts.fullStores,1);
+  assert.equal(report.fullStores[0].activities[0].minPay,30);
+  assert.equal(report.pagination.full.excludedProductItems,0);
+});
+
+test('商品活动：商品 ID 结构损坏时仍报异常，不能因通用 ID 字符串化而放行', async t => {
+  const items=[{},true,'   ',0,-1,Number.MAX_SAFE_INTEGER+1,'not-a-product-id'].map((value,index)=>{
+    const p=productPromotion('invalid-id-'+index);p.store_product.detail.jump_product_id=value;return p;
+  });
+  const original=globalThis.fetch;
+  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'?{feed_items:items}:{list:[]});
+  t.after(()=>{globalThis.fetch=original;});
+  const report=buildReport(await queryLive(1,{location,log:()=>{}}));
+  assert.equal(report.pagination.full.excludedProductItems,0);
+  assert.equal(report.pagination.full.schemaRejectedItems,7);
+  assert.equal(report.status,'blocked');assert.equal(report.errors[0].code,'INVALID_FEED_ITEMS');
+});

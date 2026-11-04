@@ -80,7 +80,7 @@ function render() {
     const actual = report.pagination ? ['full', 'ratio'].map(kind => {
       const stats = report.pagination[kind];
       return !stats ? `${kind === 'full' ? '满返' : '比例返'}未请求` : `${kind === 'full' ? '满返' : '比例返'}：计划最多 ${stats.plannedPages} 页，实际请求 ${stats.requests} 次，${stats.uniquePages} 个不同内容页，${stats.duplicatePages} 个重复响应，新增 ${stats.stores} 家（${stops[stats.stopReason] || '停止原因未知'}）`;
-    }).join('；') + '。' : legacyActual;
+    }).join('；') + '。' + (report.pagination.full?.excludedProductItems ? `另有 ${report.pagination.full.excludedProductItems} 条商品活动未提供实付门槛，未纳入满返比对。` : '') : legacyActual;
     $('scope-note').textContent = [!state.resultMatchesLocation ? '以下为历史结果，不对应当前设置的位置。重新查询后才会更新。' : '', report.status === 'partial' ? '本次只取得部分数据，重合结论不完整。下方可查看具体错误。' : '这是一次有限样本，不保证全量。增加页数不会扩大配送半径；重复内容不会增加商家数。接口比例未核对到账口径，不能据此保证实际返现。', actual].filter(Boolean).join(' ');
   }
   const attempt = state.attempt;
