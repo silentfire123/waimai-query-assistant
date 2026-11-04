@@ -172,7 +172,7 @@ export async function queryLive(pages, { location, log = console.log } = {}) {
         };
         const json = await call('SilkwormFusion', method, body, kind === 'full' ? Number(addr.adcode) : null, auth, listKey);
         const pageKey = JSON.stringify(json[listKey]);
-        if (seenPages.has(pageKey)) { coverage.push(`${kind}：接口返回重复页面，已停止翻页`); stopped = true; break; }
+        if (seenPages.has(pageKey)) { coverage.push(`${kind}：第${page + 1}页内容重复，已丢弃并继续查询`); if (page < pages - 1) await sleep(800); continue; }
         seenPages.add(pageKey);
         const converted = kind === 'full' ? feedItems(json[listKey], kind) : json.list;
         if (kind === 'ratio' && converted.some(p => !p || !p.name || !Array.isArray(p.plan_activity_info_list))) throw new Error('比例返列表缺少 name 或 plan_activity_info_list，不能当成空名单');
@@ -180,11 +180,13 @@ export async function queryLive(pages, { location, log = console.log } = {}) {
         completedPages++;
         coverage.push(`${kind} 第${page + 1}页：原始 ${json[listKey].length} 条，识别 ${converted.length} 条本类活动；不等于最终有效店铺数`);
         if (kind === 'full') {
-          if (json.feed_items.length < PAGE_SIZE) { stopped = true; break; }
+          if (json.feed_items.length < PAGE_SIZE) { coverage.push('full：本页不足 20 条，判定没有更多满返页'); stopped = true; break; }
           pagePvId = id(json.page_pv_id);
         } else {
           const next = id(json.pv_id);
-          if (!json.list.length || !next || seenCursors.has(next)) { stopped = true; break; }
+          if (!json.list.length) { coverage.push('ratio：接口返回空页，停止翻页'); stopped = true; break; }
+          if (!next) { coverage.push('ratio：接口未提供下一页游标，停止翻页'); stopped = true; break; }
+          if (seenCursors.has(next)) { coverage.push('ratio：下一页游标重复，停止翻页'); stopped = true; break; }
           seenCursors.add(next);
           pagePvId = next;
         }
@@ -262,7 +264,7 @@ async function main() {
     else if (!['--demo', '--live'].includes(args[i])) throw new Error(`未知参数：${args[i]}`);
   }
   if ([args.includes('--demo'), args.includes('--live'), args.includes('--input')].filter(Boolean).length > 1) throw new Error('--demo、--live、--input 只能选择一种');
-  const pages = Number(value('--pages') ?? 1);
+  const pages = Number(value('--pages') ?? 3);
   if (!Number.isInteger(pages) || pages < 1 || pages > 10) throw new Error('--pages 必须为 1 到 10 的整数');
   let demo = args.includes('--demo');
   const inputFile = value('--input');

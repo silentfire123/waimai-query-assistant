@@ -29,7 +29,7 @@ async function writeJson(file, value) {
   await fs.writeFile(tmp, JSON.stringify(value, null, 2) + '\n');
   await fs.rename(tmp, file);
 }
-export async function createApp({ dataDir = path.join(root, 'data'), collect = queryLive, cooldownMs = 60000 } = {}) {
+export async function createApp({ dataDir = path.join(root, 'data'), collect = queryLive, cooldownMs = 10000 } = {}) {
   const configFile = path.join(dataDir, 'settings.json');
   const stateFile = path.join(dataDir, 'latest.json');
   let settings = await readJson(configFile, { location: null });
@@ -92,7 +92,7 @@ export async function createApp({ dataDir = path.join(root, 'data'), collect = q
           if (busy || settingsBusy) throw fail(409, '查询或位置保存已经在进行中，请等待');
           if (!settings.location) throw fail(400, '请先设置查询位置');
           if (input.locationKey !== keyOf(settings.location)) throw fail(409, '位置已在其他页面修改，请刷新后确认位置再查询');
-          const pages = input.pages ?? 1;
+          const pages = input.pages ?? 3;
           if (!Number.isInteger(pages) || pages < 1 || pages > 3) throw fail(400, '每类页数必须为 1–3 的整数');
           if (Date.now() < nextAllowedAt) throw fail(429, '请稍等片刻再查询，避免频繁请求上游');
           busy = true; progress = '准备查询…'; nextAllowedAt = Date.now() + cooldownMs;

@@ -47,6 +47,7 @@ test('初始页面、静态资源、本机边界和配置路径不可访问', as
   const state=await app.getState();assert.equal(state.location,null);assert.equal(state.report,null);
   assert.match(await (await fetch(app.base)).text(),/外卖查询助手/);
   assert.equal((await fetch(app.base+'/app.js')).status,200);
+  assert.match(await (await fetch(app.base)).text(),/value=\"3\" selected/);
   for(const route of ['/data/settings.json','/poc.mjs','/.git/config']) assert.equal((await fetch(app.base+route)).status,404);
   const hostStatus=await new Promise((resolve,reject)=>{const req=http.get(app.base+'/api/state',{headers:{Host:'evil.example'}},res=>{res.resume();resolve(res.statusCode);});req.on('error',reject);});
   assert.equal(hostStatus,403);
@@ -87,9 +88,9 @@ test('全部失败保留上次结果，演示不覆盖缓存', async t => {
   assert.equal((await app.getState()).report.generatedAt,first.report.generatedAt);
 });
 test('冷却时间限制与异常恢复', async t => {
-  const app=await setup(t,{cooldownMs:60000,collect:async()=>{throw Error('测试断网');}});
+  let requestedPages=0;const app=await setup(t,{cooldownMs:10000,collect:async pages=>{requestedPages=pages;throw Error('测试断网');}});
   await app.post('/api/location',location);await app.post('/api/query');const s=await app.done();
-  assert.equal(s.attempt.status,'blocked');assert.equal(s.busy,false);assert.equal(s.report,null);
+  assert.equal(requestedPages,3);assert.equal(s.attempt.status,'blocked');assert.equal(s.busy,false);assert.equal(s.report,null);assert.ok(s.nextAllowedAt>Date.now());assert.ok(s.nextAllowedAt<Date.now()+11000);
   assert.equal((await app.post('/api/query')).status,429);
 });
 test('真实协议边界：WAF 首次即停，不冒充空列表', async t => {
@@ -107,8 +108,8 @@ test('真实协议边界：识别新 feed 与比例返，重复页停止', async
   };
   t.after(()=>{globalThis.fetch=original;});
   const result=await queryLive(3,{location,log:()=>{}});
-  assert.equal(fullCalls,2);assert.equal(ratioCalls,1);assert.equal(result.errors.length,0);
-  assert.ok(result.coverage.some(n=>n.includes('重复页面')));assert.equal(requests[0].headers['x-Teemo'],'0');
+  assert.equal(fullCalls,3);assert.equal(ratioCalls,1);assert.equal(result.errors.length,0);
+  assert.equal(result.coverage.filter(n=>n.includes('内容重复')).length,2);assert.ok(result.coverage.some(n=>n.includes('未提供下一页游标')));assert.equal(requests[0].headers['x-Teemo'],'0');
 });
 test('比例返缺少数组显示错误而非正常空名单', async t => {
   const original=globalThis.fetch;
