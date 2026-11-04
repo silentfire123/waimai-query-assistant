@@ -76,7 +76,7 @@ function render() {
       return '';
     };
     const actual = fullRead != null && ratioRead != null ? '本次实际读取：满返 ' + fullRead + '/' + limit + ' 页' + stopReason('full') + '；比例返 ' + ratioRead + '/' + limit + ' 页' + stopReason('ratio') + '。' : '';
-    $('scope-note').textContent = [!state.resultMatchesLocation ? '以下为历史结果，不对应当前设置的位置。重新查询后才会更新。' : '', report.status === 'partial' ? '本次只取得部分数据，重合结论不完整。下方可查看具体错误。' : '这是一次有限样本，不保证全量。接口比例未核对到账口径，不能据此保证实际返现。', actual].filter(Boolean).join(' ');
+    $('scope-note').textContent = [!state.resultMatchesLocation ? '以下为历史结果，不对应当前设置的位置。重新查询后才会更新。' : '', report.status === 'partial' ? '本次只取得部分数据，重合结论不完整。下方可查看具体错误。' : '这是一次有限样本，不保证全量。增加页数不会扩大配送半径；重复内容不会增加商家数。接口比例未核对到账口径，不能据此保证实际返现。', actual].filter(Boolean).join(' ');
   }
   const attempt = state.attempt;
   const errors = !demo && attempt ? attempt.errors || [] : [];

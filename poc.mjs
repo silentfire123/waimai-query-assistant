@@ -264,7 +264,7 @@ async function main() {
     else if (!['--demo', '--live'].includes(args[i])) throw new Error(`未知参数：${args[i]}`);
   }
   if ([args.includes('--demo'), args.includes('--live'), args.includes('--input')].filter(Boolean).length > 1) throw new Error('--demo、--live、--input 只能选择一种');
-  const pages = Number(value('--pages') ?? 3);
+  const pages = Number(value('--pages') ?? 5);
   if (!Number.isInteger(pages) || pages < 1 || pages > 10) throw new Error('--pages 必须为 1 到 10 的整数');
   let demo = args.includes('--demo');
   const inputFile = value('--input');

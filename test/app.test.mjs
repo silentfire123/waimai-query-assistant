@@ -47,7 +47,7 @@ test('初始页面、静态资源、本机边界和配置路径不可访问', as
   const state=await app.getState();assert.equal(state.location,null);assert.equal(state.report,null);
   assert.match(await (await fetch(app.base)).text(),/外卖查询助手/);
   assert.equal((await fetch(app.base+'/app.js')).status,200);
-  assert.match(await (await fetch(app.base)).text(),/value=\"3\" selected/);
+  assert.match(await (await fetch(app.base)).text(),/<option value="5" selected>每类最多 5 页<\/option>/);
   for(const route of ['/data/settings.json','/poc.mjs','/.git/config']) assert.equal((await fetch(app.base+route)).status,404);
   const hostStatus=await new Promise((resolve,reject)=>{const req=http.get(app.base+'/api/state',{headers:{Host:'evil.example'}},res=>{res.resume();resolve(res.statusCode);});req.on('error',reject);});
   assert.equal(hostStatus,403);
@@ -63,7 +63,7 @@ test('保存位置、任务互斥、输入限制、查询完成与落盘恢复',
   const app=await setup(t,{collect:async(pages,opts)=>{calls++;assert.equal(pages,2);assert.equal(opts.location.label,location.label);opts.log('测试采集中');await gate;return data();}});
   assert.equal((await app.post('/api/location',location)).status,200);
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(app.dir,'settings.json'),'utf8')).location,location);
-  assert.equal((await app.post('/api/query',{pages:4})).status,400);
+  assert.equal((await app.post('/api/query',{pages:11})).status,400);
   assert.equal((await app.post('/api/query',{pages:2})).status,202);
   assert.equal((await app.post('/api/query',{pages:2})).status,409);
   assert.equal((await app.post('/api/location',location)).status,409);
@@ -79,6 +79,14 @@ test('保存位置、任务互斥、输入限制、查询完成与落盘恢复',
   const staleKey=state.locationKey; await app.post('/api/location',{...location,lat:31});assert.equal((await app.getState()).resultMatchesLocation,false);
   assert.equal((await app.post('/api/query',{locationKey:staleKey})).status,409);
 });
+test('服务端支持每类十页上限并保留查询上下文', async t => {
+  let requestedPages=0;const app=await setup(t,{collect:async pages=>{requestedPages=pages;return data();}});
+  await app.post('/api/location',location);
+  for(const pages of [0,11,1.5,'10']) assert.equal((await app.post('/api/query',{pages})).status,400);
+  assert.equal(requestedPages,0);
+  assert.equal((await app.post('/api/query',{pages:10})).status,202);
+  const state=await app.done();assert.equal(requestedPages,10);assert.equal(state.report.context.pages,10);assert.equal(state.report.counts.confirmed,1);
+});
 test('全部失败保留上次结果，演示不覆盖缓存', async t => {
   let calls=0;const app=await setup(t,{collect:async()=>++calls===1?data():{...data(),full:[],ratio:[],errors:[{source:'full',code:'UPSTREAM_WAF',message:'被 WAF 拦截'}]}});
   await app.post('/api/location',location);await app.post('/api/query');const first=await app.done();
@@ -90,7 +98,7 @@ test('全部失败保留上次结果，演示不覆盖缓存', async t => {
 test('冷却时间限制与异常恢复', async t => {
   let requestedPages=0;const app=await setup(t,{cooldownMs:10000,collect:async pages=>{requestedPages=pages;throw Error('测试断网');}});
   await app.post('/api/location',location);await app.post('/api/query');const s=await app.done();
-  assert.equal(requestedPages,3);assert.equal(s.attempt.status,'blocked');assert.equal(s.busy,false);assert.equal(s.report,null);assert.ok(s.nextAllowedAt>Date.now());assert.ok(s.nextAllowedAt<Date.now()+11000);
+  assert.equal(requestedPages,5);assert.equal(s.attempt.status,'blocked');assert.equal(s.busy,false);assert.equal(s.report,null);assert.ok(s.nextAllowedAt>Date.now());assert.ok(s.nextAllowedAt<Date.now()+11000);
   assert.equal((await app.post('/api/query')).status,429);
 });
 test('真实协议边界：WAF 首次即停，不冒充空列表', async t => {
@@ -99,7 +107,7 @@ test('真实协议边界：WAF 首次即停，不冒充空列表', async t => {
   const response=await queryLive(3,{location,log:()=>{}});
   assert.equal(calls,1);assert.equal(response.errors[0].code,'UPSTREAM_WAF');assert.equal(response.errors[1].code,'SKIPPED_UPSTREAM_WAF');
 });
-test('真实协议边界：识别新 feed 与比例返，重复页停止', async t => {
+test('真实协议边界：十页偏移量正确，重复满返页跳过后继续', async t => {
   const original=globalThis.fetch;let fullCalls=0,ratioCalls=0;const requests=[];
   globalThis.fetch=async(url,opts)=>{
     requests.push(opts);const body=JSON.parse(opts.body);
@@ -107,9 +115,10 @@ test('真实协议边界：识别新 feed 与比例返，重复页停止', async
     ratioCalls++;return Response.json({status:{code:0},list:ratio});
   };
   t.after(()=>{globalThis.fetch=original;});
-  const result=await queryLive(3,{location,log:()=>{}});
-  assert.equal(fullCalls,3);assert.equal(ratioCalls,1);assert.equal(result.errors.length,0);
-  assert.equal(result.coverage.filter(n=>n.includes('内容重复')).length,2);assert.ok(result.coverage.some(n=>n.includes('未提供下一页游标')));assert.equal(requests[0].headers['x-Teemo'],'0');
+  const result=await queryLive(10,{location,log:()=>{}});
+  assert.deepEqual(requests.filter(r=>r.headers.methodname==='FusionService.GetFeedPromotions').map(r=>JSON.parse(r.body).offset),Array.from({length:10},(_,i)=>i*20));
+  assert.equal(fullCalls,10);assert.equal(ratioCalls,1);assert.equal(result.errors.length,0);
+  assert.equal(result.coverage.filter(n=>n.includes('内容重复')).length,9);assert.ok(result.coverage.some(n=>n.includes('未提供下一页游标')));assert.equal(requests[0].headers['x-Teemo'],'0');
 });
 test('比例返缺少数组显示错误而非正常空名单', async t => {
   const original=globalThis.fetch;
