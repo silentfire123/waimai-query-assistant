@@ -107,7 +107,7 @@ test('真实协议边界：WAF 首次即停，不冒充空列表', async t => {
   const response=await queryLive(3,{location,log:()=>{}});
   assert.equal(calls,1);assert.equal(response.errors[0].code,'UPSTREAM_WAF');assert.equal(response.errors[1].code,'SKIPPED_UPSTREAM_WAF');
 });
-test('真实协议边界：十页偏移量正确，重复满返页跳过后继续', async t => {
+test('真实协议边界：满返偏移推进且连续重复无新增时停止', async t => {
   const original=globalThis.fetch;let fullCalls=0,ratioCalls=0;const requests=[];
   globalThis.fetch=async(url,opts)=>{
     requests.push(opts);const body=JSON.parse(opts.body);
@@ -116,13 +116,105 @@ test('真实协议边界：十页偏移量正确，重复满返页跳过后继�
   };
   t.after(()=>{globalThis.fetch=original;});
   const result=await queryLive(10,{location,log:()=>{}});
-  assert.deepEqual(requests.filter(r=>r.headers.methodname==='FusionService.GetFeedPromotions').map(r=>JSON.parse(r.body).offset),Array.from({length:10},(_,i)=>i*20));
-  assert.equal(fullCalls,10);assert.equal(ratioCalls,1);assert.equal(result.errors.length,0);
-  assert.equal(result.coverage.filter(n=>n.includes('内容重复')).length,9);assert.ok(result.coverage.some(n=>n.includes('未提供下一页游标')));assert.equal(requests[0].headers['x-Teemo'],'0');
+  assert.deepEqual(requests.filter(r=>r.headers.methodname==='FusionService.GetFeedPromotions').map(r=>JSON.parse(r.body).offset),[0,20,40]);
+  assert.equal(fullCalls,3);assert.equal(ratioCalls,1);assert.equal(result.errors.length,0);
+  assert.equal(result.coverage.filter(n=>n.includes('内容重复')).length,2);assert.ok(result.coverage.some(n=>n.includes('未提供下一页游标')));assert.equal(requests[0].headers['x-Teemo'],'0');
 });
 test('比例返缺少数组显示错误而非正常空名单', async t => {
   const original=globalThis.fetch;
   globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'?{status:{code:0},feed_items:[]}:{status:{code:0}});
   t.after(()=>{globalThis.fetch=original;});
   const result=await queryLive(1,{location,log:()=>{}});assert.match(result.errors[0].message,/缺少 list/);
+});
+
+const feedStore = key => ({source:1,store_platform:1,store:{id:key,name:'测试店'+key},promotion_id:key,order_money:3000,user_rebate:1000,left_number:2});
+test('有效分页：同一轮保持会话才能取得满返后续门店，每轮独立会话', async t => {
+  const original=globalThis.fetch;const sessions=new Map();const firstSessions=[];
+  globalThis.fetch=async(url,opts)=>{
+    if(opts.headers.methodname!=='FusionService.GetFeedPromotions')return Response.json({list:[]});
+    const session=opts.headers['X-Session-Id'];const body=JSON.parse(opts.body);
+    if(body.offset===0)firstSessions.push(session);
+    const next=sessions.get(session)??0;sessions.set(session,next+1);
+    return Response.json({feed_items:Array.from({length:20},()=>feedStore('店'+next))});
+  };
+  t.after(()=>{globalThis.fetch=original;});
+  const result=await queryLive(3,{location,log:()=>{}});
+  assert.equal(compare(result.full,result.ratio).counts.fullStores,3,'更换会话会反复返回首批门店');
+  await queryLive(1,{location,log:()=>{}});
+  assert.notEqual(firstSessions[0],firstSessions[1],'不同查询应有独立会话');
+});
+
+test('有效分页：比例返 pv_id 不变但每页新增门店时继续读取', async t => {
+  const original=globalThis.fetch;let calls=0;const inputs=[];
+  globalThis.fetch=async(url,opts)=>{
+    if(opts.headers.methodname==='FusionService.GetFeedPromotions')return Response.json({feed_items:[]});
+    inputs.push(JSON.parse(opts.body).pv_id);calls++;
+    return Response.json({list:[{...ratio[0],wm_poi_id:'mt-'+calls}],pv_id:'stable-pv',mt_pv_id:'mt-page-'+calls});
+  };
+  t.after(()=>{globalThis.fetch=original;});
+  const result=await queryLive(4,{location,log:()=>{}});
+  assert.equal(compare(result.full,result.ratio).counts.ratioStores,4,'重复 pv_id 不是末页证据');
+  assert.deepEqual(inputs,[null,'stable-pv','stable-pv','stable-pv']);
+});
+
+test('有效分页：重复内容仍推进游标，并区分请求、内容、筛选与新增门店', async t => {
+  const original=globalThis.fetch;let calls=0;const inputs=[];
+  globalThis.fetch=async(url,opts)=>{
+    if(opts.headers.methodname!=='FusionService.GetFeedPromotions')return Response.json({list:[]});
+    const body=JSON.parse(opts.body);inputs.push(body.page_pv_id);calls++;
+    const reachedThird=body.page_pv_id==='cursor-2';
+    const items=Array.from({length:17},()=>feedStore(reachedThird?'b':'a'));
+    items.push({...feedStore('sold-out'),left_number:0},{...feedStore('bad-money'),order_money:0},{...feedStore('other-platform'),store_platform:2});
+    return Response.json({feed_items:items,page_pv_id:calls===1?'cursor-1':calls===2?'cursor-2':null});
+  };
+  t.after(()=>{globalThis.fetch=original;});
+  const result=await queryLive(3,{location,log:()=>{}});
+  assert.equal(compare(result.full,result.ratio).counts.fullStores,2,'重复内容页携带的新游标不能丢失');
+  assert.deepEqual(inputs,[null,'cursor-1','cursor-2']);
+  const stats=buildReport(result).pagination.full;
+  assert.equal(stats.requests,3);assert.equal(stats.uniquePages,2);assert.equal(stats.duplicatePages,1);
+  assert.equal(stats.rawItems,60);assert.equal(stats.classifiedItems,57);assert.equal(stats.eligibleActivities,51);assert.equal(stats.filteredActivities,6);
+  assert.equal(stats.stores,2);assert.deepEqual(stats.pages.map(p=>p.newStores),[1,0,1]);
+  assert.equal(stats.pages[1].cursorChanged,true);assert.equal(stats.stopReason,'page_limit');
+});
+
+test('有效分页：比例返会话不变且连续两次无新增门店时有界停止', async t => {
+  const original=globalThis.fetch;let calls=0;
+  globalThis.fetch=async(url,opts)=>{
+    if(opts.headers.methodname==='FusionService.GetFeedPromotions')return Response.json({feed_items:[]});
+    calls++;
+    return Response.json({list:[{...ratio[0],picture:'metadata-'+calls}],pv_id:'stable-pv'});
+  };
+  t.after(()=>{globalThis.fetch=original;});
+  const result=await queryLive(5,{location,log:()=>{}});
+  assert.equal(calls,3,'内容字段变化不能掩盖连续无新增门店');
+  assert.equal(result.pagination.ratio.stopReason,'no_progress');
+  assert.deepEqual(result.pagination.ratio.pages.map(p=>p.newStores),[1,0,0]);
+  assert.equal(compare(result.full,result.ratio).counts.ratioStores,1);
+});
+
+test('有效分页：单条满返缺失金额不丢弃同页合法门店，报告保留不完整状态', async t => {
+  const original=globalThis.fetch;let calls=0;
+  globalThis.fetch=async(url,opts)=>{
+    if(opts.headers.methodname!=='FusionService.GetFeedPromotions')return Response.json({list:[]});
+    calls++;const bad=feedStore('unknown');delete bad.order_money;
+    return Response.json({feed_items:calls===1?[bad,...Array.from({length:19},()=>feedStore('valid'))]:[feedStore('later')]});
+  };
+  t.after(()=>{globalThis.fetch=original;});
+  const result=await queryLive(3,{location,log:()=>{}});const report=buildReport(result);
+  assert.equal(report.counts.fullStores,2,'异常条目不能让整页合法活动丢失');
+  assert.equal(calls,2);assert.equal(report.status,'partial');assert.ok(report.errors.some(e=>e.code==='INVALID_FEED_ITEMS'));
+  assert.equal(report.pagination.full.schemaRejectedItems,1);assert.equal(report.pagination.full.pages[0].filteredActivities,1);
+  assert.equal(report.pagination.full.stopReason,'short_page');
+});
+
+test('有效分页：单条满返缺少 store 时仍保留同页合法活动', async t => {
+  const original=globalThis.fetch;
+  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
+    ?{feed_items:[{...feedStore('missing'),store:undefined},feedStore('valid')]}
+    :{list:[]});
+  t.after(()=>{globalThis.fetch=original;});
+  const report=buildReport(await queryLive(1,{location,log:()=>{}}));
+  assert.equal(report.counts.fullStores,1);assert.equal(report.status,'partial');
+  assert.equal(report.pagination.full.schemaRejectedItems,1);
 });

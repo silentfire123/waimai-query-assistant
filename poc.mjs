@@ -87,7 +87,7 @@ function identity() {
   return { silk, user, mode: silk === '0' ? 'anonymous' : 'own-identifiers-unverified' };
 }
 
-function headers(service, method, city, auth) {
+function headers(service, method, city, auth, sessionId) {
   const ts = String(Date.now());
   const random = crypto.randomUUID().replaceAll('-', '');
   // 跟随上游：前4位 + 本人 silk ID + 随机片段，总长16；身份为0即匿名。
@@ -96,7 +96,7 @@ function headers(service, method, city, auth) {
     'x-City': String(city ?? 0), 'X-Garen': ts, 'X-Nami': nonce,
     'X-Ashe': md5(md5(`${service}.${method}`.toLowerCase()) + ts + nonce),
     'X-Platform': 'mini', version: VERSION, 'X-Version': VERSION, 'X-App-Sr': '20',
-    'x-Teemo': auth.silk, 'x-Vayne': auth.user, 'X-Session-Id': crypto.randomUUID(),
+    'x-Teemo': auth.silk, 'x-Vayne': auth.user, 'X-Session-Id': sessionId,
     'X-Model': 'microsoft microsoft', 'x-Annie': 'XC',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36 MicroMessenger/7.0.20.1781(0x6700143B) NetType/WIFI MiniProgramEnv/Windows WindowsWechat/WMPF WindowsWechat(0x63090a13) UnifiedPCWindowsWechat(0xf254173b) XWEB/19027',
     servername: service, methodname: method,
@@ -105,7 +105,7 @@ function headers(service, method, city, auth) {
 }
 
 // 只把明确 source=1 的美团满返、source=5 的美团比例返映射到现有比对格式。
-function feedItems(items, kind) {
+function feedItems(items, kind, { onInvalid } = {}) {
   if (items.some(item => !item || typeof item !== 'object' || Array.isArray(item))) throw new Error('feed_items 含非对象项，需核对响应结构');
   if (kind === 'ratio') {
     const rows = items.filter(p => Number(p.source) === 5);
@@ -113,16 +113,20 @@ function feedItems(items, kind) {
     return rows;
   }
   const rows = items.filter(p => Number(p.source) === 1 && Number(p.store_platform) === 1);
-  if (rows.some(p => !p.store?.name || number(p.order_money) == null || number(p.user_rebate) == null)) throw new Error('满返 feed 缺少门店或金额字段，不能当成空名单');
+  const invalid = rows.filter(p => !p.store?.name || number(p.order_money) == null || number(p.user_rebate) == null);
+  if (invalid.length) {
+    if (!onInvalid) throw new Error('满返 feed 缺少门店或金额字段，不能当成空名单');
+    onInvalid(invalid.length);
+  }
   return rows.map(p => ({
-    ...p, store: { ...p.store, store_id: p.store.id }, meituan_status: 1,
+    ...p, store: { ...p.store, store_id: p.store?.id }, meituan_status: 1,
     meituan_order_money: p.order_money, meituan_user_rebate: p.user_rebate, meituan_left_number: p.left_number,
   }));
 }
 
-async function call(service, method, body, city, auth, listKey = 'feed_items') {
+async function call(service, method, body, city, auth, listKey = 'feed_items', sessionId) {
   const response = await fetch('https://gw.xiaocantech.com/rpc', {
-    method: 'POST', headers: headers(service, method, city, auth), body: JSON.stringify(body), signal: AbortSignal.timeout(20000),
+    method: 'POST', headers: headers(service, method, city, auth, sessionId), body: JSON.stringify(body), signal: AbortSignal.timeout(20000),
   });
   const text = await response.text();
   if (!response.ok) {
@@ -148,15 +152,18 @@ export async function queryLive(pages, { location, log = console.log } = {}) {
   }
   if (!addr || !Number.isFinite(Number(addr.lat)) || !Number.isFinite(Number(addr.lng)) || !Number.isFinite(Number(addr.adcode))) throw new Error('旧项目没有有效的已选地址；请先在旧项目选地址，或通过 XC_CONFIG 指定相同格式配置');
   const auth = identity();
+  // 满返分页依赖会话上下文；逐请求更换会话会重新返回首批门店。
+  const sessionId = crypto.randomUUID();
   log(auth.mode === 'anonymous' ? '新版协议（满返 feed + 比例返专用接口）；匿名验证（不代表已登录），本轮最多各查询 '+pages+' 页。' : '新版协议；仅使用本地提供的本人标识，完整登录态仍未验证。');
   const full = [], ratio = [], errors = [], coverage = [];
+  const pagination = {};
   let gatewayBlocked = false;
   for (const kind of ['full', 'ratio']) {
-    let pagePvId = null, stopped = false;
+    let pagePvId = null, stopped = false, noProgressPages = 0;
     const seenPages = new Set();
-    const seenCursors = new Set();
     const output = kind === 'full' ? full : ratio;
-    let completedPages = 0;
+    const stats = pagination[kind] = { plannedPages: pages, requests: 0, uniquePages: 0, duplicatePages: 0,
+      rawItems: 0, classifiedItems: 0, eligibleActivities: 0, filteredActivities: 0, schemaRejectedItems: 0, stores: 0, pages: [], stopReason: 'page_limit' };
     for (let page = 0; page < pages; page++) {
       try {
         log(`${kind === 'full' ? '美团实付满返' : '美团比例返'}：查询第 ${page + 1} 页…`);
@@ -170,35 +177,64 @@ export async function queryLive(pages, { location, log = console.log } = {}) {
           lat: Number(addr.lat), lon: Number(addr.lng), silk_id: Number(auth.silk),
           pv_id: pagePvId, scene: 1, app_id: 20,
         };
-        const json = await call('SilkwormFusion', method, body, kind === 'full' ? Number(addr.adcode) : null, auth, listKey);
-        const pageKey = JSON.stringify(json[listKey]);
-        if (seenPages.has(pageKey)) { coverage.push(`${kind}：第${page + 1}页内容重复，已丢弃并继续查询`); if (page < pages - 1) await sleep(800); continue; }
-        seenPages.add(pageKey);
-        const converted = kind === 'full' ? feedItems(json[listKey], kind) : json.list;
+        stats.requests++;
+        const json = await call('SilkwormFusion', method, body, kind === 'full' ? Number(addr.adcode) : null, auth, listKey, sessionId);
+        const items = json[listKey];
+        const pageKey = JSON.stringify(items);
+        const duplicateContent = seenPages.has(pageKey);
+        let schemaRejectedItems = 0;
+        const converted = kind === 'full' ? feedItems(items, kind, { onInvalid: count => {
+          schemaRejectedItems = count;
+          errors.push({ source: kind, code: 'INVALID_FEED_ITEMS', message: `第 ${page + 1} 次响应有 ${count} 条满返活动缺少门店或金额字段，已排除这些活动并继续采集；本轮结果不完整` });
+        } }) : items;
         if (kind === 'ratio' && converted.some(p => !p || !p.name || !Array.isArray(p.plan_activity_info_list))) throw new Error('比例返列表缺少 name 或 plan_activity_info_list，不能当成空名单');
-        output.push(...converted);
-        completedPages++;
-        coverage.push(`${kind} 第${page + 1}页：原始 ${json[listKey].length} 条，识别 ${converted.length} 条本类活动；不等于最终有效店铺数`);
-        if (kind === 'full') {
-          if (json.feed_items.length < PAGE_SIZE) { coverage.push('full：本页不足 20 条，判定没有更多满返页'); stopped = true; break; }
-          pagePvId = id(json.page_pv_id);
-        } else {
-          const next = id(json.pv_id);
-          if (!json.list.length) { coverage.push('ratio：接口返回空页，停止翻页'); stopped = true; break; }
-          if (!next) { coverage.push('ratio：接口未提供下一页游标，停止翻页'); stopped = true; break; }
-          if (seenCursors.has(next)) { coverage.push('ratio：下一页游标重复，停止翻页'); stopped = true; break; }
-          seenCursors.add(next);
-          pagePvId = next;
+        const rows = kind === 'full' ? fullRows(converted) : ratioRows(converted);
+        const activityCount = kind === 'full' ? converted.length : converted.reduce((sum, p) => sum + p.plan_activity_info_list.length, 0);
+        const previousStores = stats.stores;
+        if (duplicateContent) stats.duplicatePages++;
+        else {
+          seenPages.add(pageKey);
+          stats.uniquePages++;
+          output.push(...converted);
+        }
+        stats.stores = groupStores(kind === 'full' ? fullRows(output) : ratioRows(output)).length;
+        const next = id(kind === 'full' ? json.page_pv_id : json.pv_id);
+        const pageStats = { request: page + 1, rawItems: items.length, classifiedItems: converted.length,
+          eligibleActivities: rows.length, filteredActivities: activityCount - rows.length, schemaRejectedItems,
+          newStores: stats.stores - previousStores, totalStores: stats.stores, duplicateContent,
+          cursorPresent: next !== null, cursorChanged: next !== null && next !== pagePvId };
+        stats.pages.push(pageStats);
+        for (const key of ['rawItems', 'classifiedItems', 'eligibleActivities', 'filteredActivities', 'schemaRejectedItems']) stats[key] += pageStats[key];
+        coverage.push(`${kind} 第${page + 1}次：原始 ${items.length} 条，识别 ${converted.length} 条本类记录，有效活动 ${rows.length} 条，过滤 ${pageStats.filteredActivities} 条；新增 ${pageStats.newStores} 家，累计 ${stats.stores} 家${duplicateContent ? '；内容重复，已去重' : ''}`);
+        // 内容去重与翻页状态独立；相同列表也可能携带有效的新游标。
+        pagePvId = next;
+        if (!items.length) {
+          stats.stopReason = 'empty_page';
+          coverage.push(`${kind}：接口返回空页，停止翻页；不保证全量`); stopped = true; break;
+        }
+        if (kind === 'full' && items.length < PAGE_SIZE) {
+          stats.stopReason = 'short_page';
+          coverage.push('full：本页不足 20 条，停止翻页；不保证全量'); stopped = true; break;
+        }
+        if (kind === 'ratio' && !next) {
+          stats.stopReason = 'missing_cursor';
+          coverage.push('ratio：接口未提供下一页游标，停止翻页'); stopped = true; break;
+        }
+        noProgressPages = pageStats.newStores === 0 && !pageStats.cursorChanged ? noProgressPages + 1 : 0;
+        if (noProgressPages >= 2) {
+          stats.stopReason = 'no_progress';
+          coverage.push(`${kind}：连续两次无新增门店且游标未推进，停止本轮；不代表已全量`); stopped = true; break;
         }
       } catch (e) {
         errors.push({ source: kind, message: e.message, ...(e.code ? { code: e.code } : {}), ...(e.httpStatus ? { httpStatus: e.httpStatus } : {}) });
+        stats.stopReason = e.code === 'UPSTREAM_WAF' ? 'waf' : 'error';
         gatewayBlocked = e.code === 'UPSTREAM_WAF';
         stopped = true;
         break;
       }
       if (page < pages - 1) await sleep(800);
     }
-    coverage.push(`${kind}：成功读取 ${completedPages} 页${stopped ? '' : '，达到本次页数上限'}；不保证全量`);
+    coverage.push(`${kind}：计划最多 ${pages} 页，实际请求 ${stats.requests} 次，取得 ${stats.uniquePages} 个不同内容页，${stats.duplicatePages} 个重复响应，累计新增 ${stats.stores} 家${stopped ? '' : '，达到本次页数上限'}；不保证全量`);
     if (gatewayBlocked) {
       if (kind === 'full') {
         errors.push({ source: 'ratio', code: 'SKIPPED_UPSTREAM_WAF', message: '未请求：共享网关已明确返回 WAF 拦截，本轮停止，不代表比例返名单为空' });
@@ -208,7 +244,7 @@ export async function queryLive(pages, { location, log = console.log } = {}) {
     }
     if (kind === 'full') await sleep(800);
   }
-  return { source: 'live', full, ratio, errors, coverage, protocol: { fullMethod: FEED_METHOD, ratioMethod: RATIO_METHOD, version: VERSION, identityMode: auth.mode } };
+  return { source: 'live', full, ratio, errors, coverage, pagination, protocol: { fullMethod: FEED_METHOD, ratioMethod: RATIO_METHOD, version: VERSION, identityMode: auth.mode } };
 }
 
 function validateInput(input) {
@@ -238,7 +274,7 @@ export function buildReport(data) {
   const status = data.source === 'demo' ? 'demo' : data.errors.length ? (result.counts.fullStores || result.counts.ratioStores ? 'partial' : 'blocked')
     : result.matches.length ? 'sample_overlap' : result.candidates.length ? 'candidates_only' : 'no_overlap_in_sample';
   const report = {
-    source: data.source, status, generatedAt: new Date().toISOString(), ...(data.protocol ? { protocol: data.protocol } : {}), ...result, errors: data.errors,
+    source: data.source, status, generatedAt: new Date().toISOString(), ...(data.pagination ? { pagination: data.pagination } : {}), ...(data.protocol ? { protocol: data.protocol } : {}), ...result, errors: data.errors,
     notes: [
       '同 ID 重合只证明两类名单存在同一门店，不代表可同时报名、叠加到账或当前时段可用。',
       '同名候选保留完整分店名称，只统一空白、标点及全半角；不做品牌模糊匹配。已知美团 ID 不同不匹配。',
