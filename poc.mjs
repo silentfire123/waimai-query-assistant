@@ -104,7 +104,7 @@ function headers(service, method, city, auth, sessionId) {
   };
 }
 
-// 只把明确 source=1 的美团满返、source=5 的美团比例返映射到现有比对格式。
+// 满返 feed 的 source=1/2 均有确定金额活动；仍须 store_platform=1，未知来源不猜测。
 function feedItems(items, kind, { onInvalid, onExcludedProduct } = {}) {
   if (items.some(item => !item || typeof item !== 'object' || Array.isArray(item))) throw new Error('feed_items 含非对象项，需核对响应结构');
   if (kind === 'ratio') {
@@ -112,7 +112,7 @@ function feedItems(items, kind, { onInvalid, onExcludedProduct } = {}) {
     if (rows.some(p => !p.name || !Array.isArray(p.plan_activity_info_list))) throw new Error('比例返 feed 缺少 name 或 plan_activity_info_list，不能当成空名单');
     return rows;
   }
-  const selected = items.filter(p => Number(p.source) === 1 && Number(p.store_platform) === 1);
+  const selected = items.filter(p => [1, 2].includes(Number(p.source)) && Number(p.store_platform) === 1);
   // 混合 feed 也包含有商品详情却无满返门槛的记录；商品价不能代替实付门槛。
   const productItems = selected.filter(p => {
     const product = p.store_product;
