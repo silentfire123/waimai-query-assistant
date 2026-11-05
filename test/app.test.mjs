@@ -47,7 +47,7 @@ test('初始页面、静态资源、本机边界和配置路径不可访问', as
   const state=await app.getState();assert.equal(state.location,null);assert.equal(state.report,null);
   assert.match(await (await fetch(app.base)).text(),/外卖查询助手/);
   assert.equal((await fetch(app.base+'/app.js')).status,200);
-  assert.match(await (await fetch(app.base)).text(),/<option value="5" selected>每类最多 5 页<\/option>/);
+  assert.match(await (await fetch(app.base)).text(),/<option value="10" selected>每类最多 10 页<\/option>/);
   for(const route of ['/data/settings.json','/poc.mjs','/.git/config']) assert.equal((await fetch(app.base+route)).status,404);
   const hostStatus=await new Promise((resolve,reject)=>{const req=http.get(app.base+'/api/state',{headers:{Host:'evil.example'}},res=>{res.resume();resolve(res.statusCode);});req.on('error',reject);});
   assert.equal(hostStatus,403);
@@ -60,12 +60,12 @@ test('初始页面、静态资源、本机边界和配置路径不可访问', as
 });
 test('保存位置、任务互斥、输入限制、查询完成与落盘恢复', async t => {
   let release;const gate=new Promise(resolve=>release=resolve);let calls=0;
-  const app=await setup(t,{collect:async(pages,opts)=>{calls++;assert.equal(pages,2);assert.equal(opts.location.label,location.label);opts.log('测试采集中');await gate;return data();}});
+  const app=await setup(t,{collect:async(pages,opts)=>{calls++;assert.equal(pages,10);assert.equal(opts.location.label,location.label);opts.log('测试采集中');await gate;return data();}});
   assert.equal((await app.post('/api/location',location)).status,200);
   assert.deepEqual(JSON.parse(await fs.readFile(path.join(app.dir,'settings.json'),'utf8')).location,location);
   assert.equal((await app.post('/api/query',{pages:11})).status,400);
-  assert.equal((await app.post('/api/query',{pages:2})).status,202);
-  assert.equal((await app.post('/api/query',{pages:2})).status,409);
+  assert.equal((await app.post('/api/query',{pages:10})).status,202);
+  assert.equal((await app.post('/api/query',{pages:10})).status,409);
   assert.equal((await app.post('/api/location',location)).status,409);
   assert.equal((await app.getState()).busy,true);release();
   const state=await app.done();assert.equal(calls,1);assert.equal(state.report.counts.confirmed,1);assert.equal(state.resultMatchesLocation,true);
@@ -79,13 +79,18 @@ test('保存位置、任务互斥、输入限制、查询完成与落盘恢复',
   const staleKey=state.locationKey; await app.post('/api/location',{...location,lat:31});assert.equal((await app.getState()).resultMatchesLocation,false);
   assert.equal((await app.post('/api/query',{locationKey:staleKey})).status,409);
 });
-test('服务端支持每类十页上限并保留查询上下文', async t => {
+test('服务端只允许 10/20 页并保留查询上下文', async t => {
   let requestedPages=0;const app=await setup(t,{collect:async pages=>{requestedPages=pages;return data();}});
   await app.post('/api/location',location);
-  for(const pages of [0,11,1.5,'10']) assert.equal((await app.post('/api/query',{pages})).status,400);
+  for(const pages of [0,1,3,5,11,21,1.5,'10']) assert.equal((await app.post('/api/query',{pages})).status,400);
   assert.equal(requestedPages,0);
   assert.equal((await app.post('/api/query',{pages:10})).status,202);
   const state=await app.done();assert.equal(requestedPages,10);assert.equal(state.report.context.pages,10);assert.equal(state.report.counts.confirmed,1);
+});
+test('网页二十页查询可执行', async t => {
+ let pages;const app=await setup(t,{collect:async p=>{pages=p;return data();}});
+ await app.post('/api/location',location);assert.equal((await app.post('/api/query',{pages:20})).status,202);
+ const state=await app.done();assert.equal(pages,20);assert.equal(state.report.context.pages,20);
 });
 test('全部失败保留上次结果，演示不覆盖缓存', async t => {
   let calls=0;const app=await setup(t,{collect:async()=>++calls===1?data():{...data(),full:[],ratio:[],errors:[{source:'full',code:'UPSTREAM_WAF',message:'被 WAF 拦截'}]}});
@@ -98,7 +103,7 @@ test('全部失败保留上次结果，演示不覆盖缓存', async t => {
 test('冷却时间限制与异常恢复', async t => {
   let requestedPages=0;const app=await setup(t,{cooldownMs:10000,collect:async pages=>{requestedPages=pages;throw Error('测试断网');}});
   await app.post('/api/location',location);await app.post('/api/query');const s=await app.done();
-  assert.equal(requestedPages,5);assert.equal(s.attempt.status,'blocked');assert.equal(s.busy,false);assert.equal(s.report,null);assert.ok(s.nextAllowedAt>Date.now());assert.ok(s.nextAllowedAt<Date.now()+11000);
+  assert.equal(requestedPages,10);assert.equal(s.attempt.status,'blocked');assert.equal(s.busy,false);assert.equal(s.report,null);assert.ok(s.nextAllowedAt>Date.now());assert.ok(s.nextAllowedAt<Date.now()+11000);
   assert.equal((await app.post('/api/query')).status,429);
 });
 test('真实协议边界：WAF 首次即停，不冒充空列表', async t => {
@@ -342,7 +347,7 @@ test('固定返展示：网页与导出报告保留金额、未知门槛、商�
   assert.equal(html.split('固定返 6 元（实付门槛未明确）').length-1,2,'导出的重合行和完整名单都应展示固定返金额');
   assert.ok(html.includes('&lt;img'));assert.ok(!html.includes('<img'));
   const source=await fs.readFile(new URL('../web/app.js',import.meta.url),'utf8');
-  const renderer=source.slice(0,source.indexOf('function ratioActivities'));
+  const renderer=source.slice(source.indexOf("'use strict'"),source.indexOf('function ratioActivities'));
   const rendered=runInNewContext(renderer+';fullActivities(store)',{store:report.fullStores[0]});
   assert.ok(rendered.includes('固定返'));assert.ok(rendered.includes('¥6'));
   assert.ok(rendered.includes('实付门槛未明确'));assert.ok(!rendered.includes('¥0'));assert.ok(!rendered.includes('¥null'));
@@ -378,3 +383,40 @@ test('固定返：布尔、对象、空白等不明确金额不能被转换为�
   assert.equal(report.pagination.full.schemaRejectedItems,5);
   assert.ok(report.errors[0].items.every(i=>i.missingFields.includes('返现金额')));
 });
+
+test('位置搜索与诊断导出通过服务端接口可用', async t=>{
+ const app=await setup(t,{search:async()=>[{...location,city:'测试市'}]});
+ const r=await app.post('/api/location-search',{keyword:'测试'});assert.equal(r.status,200);assert.equal((await r.json()).locations[0].city,'测试市');
+ assert.equal((await fetch(app.base+'/api/diagnostics')).status,404);
+});
+
+test('云端保护覆盖所有业务端点，不凭 Host 或转发头绕过',async t=>{
+ const app=await setup(t,{publicOrigin:'https://example.test',accessPassword:'a-long-test-password'});
+ for(const route of ['/api/state','/api/diagnostics','/api/demo','/'])assert.equal((await fetch(app.base+route)).status,401);
+ const headers={Authorization:'Basic '+Buffer.from('owner:a-long-test-password').toString('base64')};
+ const state=await fetch(app.base+'/api/state',{headers});assert.equal(state.status,200);
+ const r=await fetch(app.base+'/api/query',{method:'POST',headers:{...headers,Origin:'https://evil.example','Content-Type':'application/json','X-CSRF-Token':(await state.json()).csrfToken},body:'{}'});assert.equal(r.status,403);
+});
+
+test('重启恢复中断查询为失败提示，不永久 busy 且保留结果',async t=>{
+ const app=await setup(t);await fs.writeFile(path.join(app.dir,'latest.json'),JSON.stringify({report:null,attempt:{status:'running',context:{queryId:'old-query'},errors:[]}}));
+ const restarted=await createApp({dataDir:app.dir});await new Promise(r=>restarted.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>{restarted.close(r);restarted.closeAllConnections();}));
+ const s=await (await fetch('http://127.0.0.1:'+restarted.address().port+'/api/state')).json();assert.equal(s.busy,false);assert.equal(s.attempt.status,'blocked');assert.match(s.attempt.errors[0].message,/重启/);
+});
+
+test('诊断在服务重启后仍可导出最近查询，结果与位置分别保存',async t=>{
+ const app=await setup(t,{collect:async()=>data()});await app.post('/api/location',location);await app.post('/api/query');await app.done();
+ const first=await (await fetch(app.base+'/api/diagnostics')).json();assert.ok(first.queryId);assert.equal(typeof first.config.hasWmToken,'boolean');assert.equal(typeof first.config.hasAmapKey,'boolean');assert.equal(first.config.publicMode,false);
+ const restarted=await createApp({dataDir:app.dir});await new Promise(r=>restarted.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>{restarted.close(r);restarted.closeAllConnections();}));
+ const diagnostic=await (await fetch('http://127.0.0.1:'+restarted.address().port+'/api/diagnostics')).json();assert.equal(diagnostic.queryId,first.queryId);
+});
+
+test('定位接口：GCJ 转换后地址核对，未保存也不查询活动',async t=>{
+ let calls=0;const app=await setup(t,{collect:async()=>{calls++;return data();},reverse:async()=>({...location,city:'北京市'})});
+ const r=await app.post('/api/location-reverse',{lat:39.9,lng:116.3});assert.equal(r.status,200);assert.equal((await r.json()).location.city,'北京市');assert.equal((await app.getState()).location,null);assert.equal(calls,0);
+});
+
+test('位置限流：第二次搜索429，且不触发采集',async t=>{const originalNow=Date.now;Date.now=()=>1000000;t.after(()=>{Date.now=originalNow;});let collected=0;const app=await setup(t,{search:async()=>[],collect:async()=>{collected++;return data();}});assert.equal((await app.post('/api/location-search',{keyword:'测试'})).status,200);assert.equal((await app.post('/api/location-search',{keyword:'测试'})).status,429);assert.equal(collected,0);});
+test('查询前落盘失败：返回503且不调用上游，不永久busy',async t=>{let calls=0;const app=await setup(t,{collect:async()=>{calls++;return data();}});await app.post('/api/location',location);await fs.mkdir(path.join(app.dir,'latest.json.tmp'));const response=await app.post('/api/query',{pages:10});assert.equal(response.status,503);assert.equal(calls,0);assert.equal((await app.getState()).busy,false);});
+test('计算模块静态接口：可加载且MIME正确',async t=>{const app=await setup(t);const r=await fetch(app.base+'/calculator.mjs');assert.equal(r.status,200);assert.match(r.headers.get('content-type'),/text.javascript/);assert.match(await r.text(),/export function calculate/);});
+test('尚无查询时诊断明确404而非下载空对象',async t=>{const app=await setup(t);const r=await fetch(app.base+'/api/diagnostics');assert.equal(r.status,404);assert.match((await r.json()).error,/尚无查询诊断/);});

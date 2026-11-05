@@ -1,9 +1,10 @@
+import {calculate,bestCombination} from '/calculator.mjs';
 'use strict';
 const $ = id => document.getElementById(id);
 const esc = v => String(v ?? '—').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const money = v => Number.isFinite(v) ? Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : '待核对';
 const time = v => v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) + ' 北京时间' : '未知时间';
-let state = null, demo = null, tab = 'overlap', polling = false, localError = '';
+let state = null, demo = null, tab = 'overlap', polling = false, localError = '', connected = false;
 async function api(route, value) {
   const response = await fetch(route, value === undefined ? {} : { method:'POST', headers:{'Content-Type':'application/json', 'X-CSRF-Token':state?.csrfToken ?? ''}, body:JSON.stringify(value) });
   const data = await response.json();
@@ -14,23 +15,24 @@ function message(text, error = false) {
   $('message').hidden = !text; $('message').textContent = text; $('message').className = error ? 'error' : '';
 }
 const emptyIcon = '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="19" cy="22" r="12"/><circle cx="29" cy="22" r="12"/><path d="M19 36v6m10-6v6"/></svg>';
+const sourceName=a=>a.source==='waimai'?'歪麦（会员口径）':'小蚕';
 function fullActivities(store) {
-  return store.activities.map(a => `<li>${a.rebateType === 'fixed' || a.minPay == null
+  return store.activities.map(a => `<li><strong>${sourceName(a)}</strong> · ${a.rebate == null ? '会员满返金额待填写' : a.rebateType === 'fixed' || a.minPay == null
     ? `固定返 <strong>¥${money(a.rebate)}</strong> · 实付门槛未明确`
-    : `实付满 <strong>¥${money(a.minPay)}</strong> 返 <strong>¥${money(a.rebate)}</strong>`}${a.productName ? ` · 指定商品：${esc(a.productName)}` : ''} · ${esc(a.condition)}</li>`).join('');
+    : `实付满 <strong>¥${money(a.minPay)}</strong> 返 <strong>¥${money(a.rebate)}</strong>`}${a.referenceGrade ? ` · 接口最大阶梯参考：满 ${esc(a.referenceGrade.fullMoney)} 返 ${esc(a.referenceGrade.rebateMoney)}（不是最低门槛，会员金额待填写）` : ''}${a.productName ? ` · 指定商品：${esc(a.productName)}` : ''} · ${esc(a.condition)}</li>`).join('');
 }
 function ratioActivities(store) {
-  return store.activities.map(a => `<li>接口比例 <strong>${money(a.ratioPercent)}%</strong>${a.maxCashback == null ? '' : ` · 接口封顶 ¥${money(a.maxCashback)}`}${a.userRatioPercent == null ? '' : ` · 用户字段 ${money(a.userRatioPercent)}%`}${a.userMaxCashback == null ? '' : ` · 用户封顶 ¥${money(a.userMaxCashback)}`} · ${esc(a.condition)}</li>`).join('');
+  return store.activities.map(a => `<li><strong>${sourceName(a)}</strong> · 接口比例 <strong>${money(a.ratioPercent)}%</strong>${a.maxCashback == null ? '' : ` · 接口封顶 ¥${money(a.maxCashback)}`}${a.userRatioPercent == null ? '' : ` · 用户字段 ${money(a.userRatioPercent)}%`}${a.userMaxCashback == null ? '' : ` · 用户封顶 ¥${money(a.userMaxCashback)}`} · ${esc(a.condition)}</li>`).join('');
 }
-function row(store, kind, match) {
-  return `<article class="store"><div>${match ? `<span class="badge ${match.basis === '相同美团门店 ID' ? '' : 'candidate'}">${match.basis === '相同美团门店 ID' ? '同 ID 重合' : '同名待确认'}</span>` : ''}<h3>${esc(store.name)}</h3><ul class="activities">${match ? fullActivities(match.full) + ratioActivities(match.ratio) : kind === 'full' ? fullActivities(store) : ratioActivities(store)}</ul></div><span class="store-kind">${match ? '两类名单交集' : kind === 'full' ? '实付满返' : '比例返'}</span></article>`;
+function row(store, kind, match, index) {
+  return `<article class="store"><div>${match ? `<span class="badge ${match.basis === '相同美团门店 ID' ? '' : 'candidate'}">${match.basis === '相同美团门店 ID' ? '同 ID 重合' : '同名待确认'}</span>` : ''}<h3>${esc(store.name)}</h3><ul class="activities">${match ? fullActivities(match.full) + ratioActivities(match.ratio) : kind === 'full' ? fullActivities(store) : ratioActivities(store)}</ul>${match ? calculatorMarkup(match,index) : ''}</div><span class="store-kind">${match ? '两类名单交集' : kind === 'full' ? '实付满返' : '比例返'}</span></article>`;
 }
 function renderList() {
   const report = demo || state?.report;
   const search = $('search').value.trim().normalize('NFKC').toLowerCase();
   let rows = report ? tab === 'overlap' ? [...report.matches, ...report.candidates].map(m => ({ store:m.full, match:m })) : (tab === 'full' ? report.fullStores : report.ratioStores).map(store => ({ store })) : [];
   rows = rows.filter(({store}) => store.name.normalize('NFKC').toLowerCase().includes(search));
-  if (rows.length) { $('result-list').innerHTML = rows.map(({store, match}) => row(store, tab, match)).join(''); return; }
+  if (rows.length) { $('result-list').innerHTML = rows.map(({store, match},index) => row(store, tab, match,index)).join(''); rows.forEach(({match},index)=>{if(match)bindCalculator(match,index);}); return; }
   let title = '从一个位置开始', detail = '设置位置后点击查询，或先查看演示。不会自动调用真实接口。';
   if (report) {
     if (search) { title = '没有找到这个名字'; detail = '试试更短的关键词，或切换到另一份名单。'; }
@@ -78,9 +80,10 @@ function render() {
       return '';
     };
     const legacyActual = fullRead != null && ratioRead != null ? '本次实际读取：满返 ' + fullRead + '/' + limit + ' 页' + stopReason('full') + '；比例返 ' + ratioRead + '/' + limit + ' 页' + stopReason('ratio') + '。' : '';
-    const stops = { page_limit: '达到本次请求上限，非全部商家', empty_page: '返回空页', short_page: '响应不足一页', missing_cursor: '未提供下一页游标', no_progress: '连续两次无新增且游标未推进', waf: '上游拦截', error: '请求失败' };
-    const actual = report.pagination ? ['full', 'ratio'].map(kind => {
+    const stops = { upstream_end: '上游明确无下一页', page_limit: '达到本次请求上限，非全部商家', empty_page: '返回空页', short_page: '响应不足一页', missing_cursor: '未提供下一页游标', no_progress: '连续两次无新增且游标未推进', waf: '上游拦截', error: '请求失败' };
+    const actual = report.pagination ? ['full', 'ratio', 'waimai'].map(kind => {
       const stats = report.pagination[kind];
+      if(kind==='waimai')return stats ? '歪麦：计划最多 '+stats.plannedPages+' 页，实际请求 '+stats.requests+' 次，累计新增 '+stats.stores+' 家（'+(stops[stats.stopReason] || stats.stopReason)+'）' : '歪麦未请求';
       return !stats ? `${kind === 'full' ? '满返' : '比例返'}未请求` : `${kind === 'full' ? '满返' : '比例返'}：计划最多 ${stats.plannedPages} 页，实际请求 ${stats.requests} 次，${stats.uniquePages} 个不同内容页，${stats.duplicatePages} 个重复响应，新增 ${stats.stores} 家（${stops[stats.stopReason] || '停止原因未知'}）`;
     }).join('；') + '。' + (report.pagination.full?.excludedProductItems ? `另有 ${report.pagination.full.excludedProductItems} 条商品活动未提供实付门槛，未纳入满返比对。` : '') : legacyActual;
     $('scope-note').textContent = [!state.resultMatchesLocation ? '以下为历史结果，不对应当前设置的位置。重新查询后才会更新。' : '', report.status === 'partial' ? '本次取得了部分名单，重合结论可能漏项。具体原因见上方提醒。' : '这是一次有限样本，不保证全量。增加页数不会扩大配送半径；重复内容不会增加商家数。接口比例未核对到账口径，不能据此保证实际返现。', actual].filter(Boolean).join(' ');
@@ -91,7 +94,8 @@ function render() {
   $('attempt').className = partialAttempt ? 'notice warning' : 'notice error';
   $('attempt').setAttribute('role', partialAttempt ? 'status' : 'alert');
   $('attempt').hidden = !errors.length && !attempt?.persistenceError || !!demo;
-  $('attempt').textContent = errors.map(e => `${({full:'实付满返', ratio:'比例返', query:'查询'})[e.source] || e.source}：${e.message}`).join('；') + (attempt?.persistenceError ? '；' + attempt.persistenceError : '') + (errors.length && state.report && attempt?.generatedAt !== state.report.generatedAt ? '。未覆盖上次结果，以下仍为历史名单。' : '');
+  $('attempt').textContent = errors.map(e => `${({full:'小蚕实付满返', ratio:'小蚕比例返', waimai:'歪麦', query:'查询'})[e.source] || e.source}：${e.message}${e.upstreamCode ? `（上游业务码 ${esc(e.upstreamCode)}）` : ''}`).join('；') + (attempt?.persistenceError ? '；' + attempt.persistenceError : '') + (errors.length && state.report && attempt?.generatedAt !== state.report.generatedAt ? '。未覆盖上次结果，以下仍为历史名单。' : '');
+  $('query-id').textContent=state.attempt?.context?.queryId ? '查询编号 '+state.attempt.context.queryId+' · 代码版本 '+(state.codeVersion??'未知') : '代码版本 '+(state.codeVersion??'未知');
   const counts = report?.counts;
   $('count-overlap').textContent = counts ? `${counts.confirmed} 确认 / ${counts.candidatePairs} 待确认` : '0';
   $('count-full').textContent = counts?.fullStores ?? 0;
@@ -102,8 +106,8 @@ function render() {
   renderList();
 }
 async function refresh() {
-  try { state = await api('/api/state'); if (localError) { message('本地服务已恢复'); localError = ''; } render(); if (state.busy) poll(); }
-  catch (e) { localError = e.message; message('无法连接本地服务，请确认启动窗口仍在运行，然后刷新页面。', true); }
+  try { state = await api('/api/state'); $('retry-connect').hidden=true; if(!connected){message('');connected=true;} if (localError) { message('本地服务已恢复'); localError = ''; } render(); if (state.busy) poll(); }
+  catch (e) { localError = e.message; $('retry-connect').hidden=false; message('服务暂未连接，可能正在唤醒。请稍后点击重试；本地使用时请确认启动窗口仍在运行。', true); }
 }
 async function poll() {
   if (polling) return; polling = true;
@@ -116,7 +120,7 @@ async function poll() {
 }
 $('edit-location').addEventListener('click', () => {
   $('location-form').hidden = !$('location-form').hidden;
-  if (!$('location-form').hidden) { for (const key of ['label','lat','lng','adcode']) $('location-form').elements[key].value = state?.location?.[key] ?? ''; $('location-form').elements.label.focus(); }
+  if (!$('location-form').hidden) { for (const key of ['label','lat','lng','adcode','city']) $('location-form').elements[key].value = state?.location?.[key] ?? ''; $('location-form').elements.label.focus(); }
 });
 $('cancel-location').onclick = () => { $('location-form').hidden = true; $('edit-location').focus(); };
 $('location-form').addEventListener('submit', async event => {
@@ -139,3 +143,60 @@ $('search').addEventListener('input', renderList);
 document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => { tab = button.dataset.tab; $('search').value = ''; render(); });
 setInterval(() => { if (state && !state.busy && state.nextAllowedAt > Date.now() - 1500) renderQueryControls(); }, 1000);
 refresh();
+
+function calculatorMarkup(match,index){
+ const best=bestCombination(match.full.activities,match.ratio.activities);
+ const options=(items,chosen,kind)=>items.map((a,i)=>`<option value="${i}"${i===chosen?' selected':''}>${i+1}. ${sourceName(a)} · ${kind==='ratio'?(a.ratioPercent==null?'会员比例待填写':money(a.ratioPercent)+'%')+' / 封顶¥'+money(a.maxCashback):'满¥'+money(a.minPay)+'返¥'+money(a.rebate)} · ${esc(a.condition??'条件未提供')}</option>`).join('');
+ return `<section class="calculator" id="calc-${index}" aria-label="返后净支出计算器"><label>订单实付（元）<input data-field="pay" type="number" min="0" step="0.01" inputmode="decimal" placeholder="请输入实际支付金额"></label><output class="net" aria-live="polite"></output><details><summary>展开切换活动与来源 / 填写缺失值</summary><label>一份满返<select data-field="full">${options(match.full.activities,best?.fullIndex,'full')}</select></label><label>一份比例返<select data-field="ratio">${options(match.ratio.activities,best?.ratioIndex,'ratio')}</select></label><div class="manual-fields"><label>会员满返金额（元，缺失时填写）<input data-field="rebate" type="number" min="0" step="0.01" inputmode="decimal"></label><label>实付门槛（元，未知可留空）<input data-field="threshold" type="number" min="0" step="0.01" inputmode="decimal"></label><label>会员比例（%，缺失时填写）<input data-field="percent" type="number" min="0" step="0.01" inputmode="decimal"></label><label>封顶（元，缺失时填写）<input data-field="cap" type="number" min="0" step="0.01" inputmode="decimal"></label></div><button type="button" class="text-button" data-reset>恢复自动最优组合</button></details><p class="form-help">每次只算一份满返 + 一份比例返；不判断能否叠加，不保证到账。同名候选未确认是同一门店。</p></section>`;
+}
+function bindCalculator(match,index){
+ const panel=$('calc-'+index),field=k=>panel.querySelector(`[data-field="${k}"]`);
+ let automatic=true;const initial=bestCombination(match.full.activities,match.ratio.activities);
+ const edits={full:new Map(),ratio:new Map()};
+ const keys={full:{rebate:'rebate',threshold:'minPay'},ratio:{percent:'ratioPercent',cap:'maxCashback'}};
+ const activity=(kind,i=Number(field(kind).value))=>({...match[kind].activities[i],...edits[kind].get(i)});
+ if(initial?.pay!=null)field('pay').value=initial.pay;
+ const value=k=>field(k).value.trim()===''?null:Number(field(k).value);
+ const refill=(kind)=>{for(const side of kind?[kind]:['full','ratio']){const a=activity(side),raw=match[side].activities[Number(field(side).value)];for(const [k,property] of Object.entries(keys[side])){field(k).value=a[property]??'';field(k).disabled=raw[property]!=null;}}};
+ function update(){
+  const pay=value('pay');
+  if(automatic){const full=match.full.activities.map((_,i)=>activity('full',i)),ratio=match.ratio.activities.map((_,i)=>activity('ratio',i));const best=bestCombination(full,ratio,pay??NaN);if(best){field('full').value=best.fullIndex;field('ratio').value=best.ratioIndex;}refill();}
+  const result=calculate(activity('full'),activity('ratio'),pay??NaN);
+  panel.querySelector('output').textContent=result.status==='ok'?`返后预计净支出 ¥${money(result.net)} = 实付 ¥${money(result.pay)} − 满返 ¥${money(result.fullRebate)} − 比例返 ¥${money(result.ratioRebate)}`:result.message;
+ }
+ field('pay').addEventListener('input',update);
+ for(const kind of ['full','ratio'])field(kind).addEventListener('change',()=>{automatic=false;refill(kind);update();});
+ for(const [kind,properties] of Object.entries(keys))for(const k of Object.keys(properties))field(k).addEventListener('input',()=>{automatic=false;edits[kind].set(Number(field(kind).value),Object.fromEntries(Object.entries(properties).map(([input,property])=>[property,value(input)])));update();});
+ panel.querySelector('[data-reset]').onclick=()=>{automatic=true;update();};refill();update();
+}
+
+function previewLocation(location){
+ const form=$('location-form');form.hidden=false;
+ for(const key of ['label','lat','lng','adcode','city'])form.elements[key].value=location[key]??'';
+ $('location-status').textContent='请核对地址：'+location.label+'。确认后保存，再手动点击查询。';
+}
+$('search-address').onclick=async()=>{
+ const button=$('search-address');button.disabled=true;$('location-status').textContent='正在搜索地址…';$('address-results').replaceChildren();
+ try{const data=await api('/api/location-search',{keyword:$('address-keyword').value});
+  $('location-status').textContent=data.locations.length?'请选择并核对位置；不会自动查询活动。':'没有找到地址，请补充城市名称。';
+  for(const location of data.locations){const b=document.createElement('button');b.type='button';b.className='address-option';b.textContent=location.label+' · '+(location.address??'');b.onclick=()=>previewLocation(location);$('address-results').append(b);}
+ }catch(e){$('location-status').textContent=e.message;}finally{button.disabled=false;}
+};
+$('locate-once').onclick=()=>{
+ const status=$('location-status'),button=$('locate-once');
+ if(!navigator.geolocation){status.textContent='浏览器不支持定位，请搜索地址选点。';return;}
+ button.disabled=true;status.textContent='等待浏览器定位授权，仅获取一次；不会自动查询活动。';
+ navigator.geolocation.getCurrentPosition(async position=>{
+  try{const result=await api('/api/location-reverse',{lat:position.coords.latitude,lng:position.coords.longitude});previewLocation(result.location);}
+  catch(e){status.textContent=e.message+' 可搜索地址纠正。';}
+  finally{button.disabled=false;}
+ },()=>{status.textContent='定位失败或未授权，请搜索地址选点。';button.disabled=false;},{enableHighAccuracy:true,timeout:15000,maximumAge:0});
+};
+
+$('retry-connect').onclick=()=>refresh();
+
+$('export-diagnostic').addEventListener('click',async event=>{
+ event.preventDefault();
+ try{const data=await api('/api/diagnostics');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='diagnostic.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+ catch(error){message(error.message,true);}
+});

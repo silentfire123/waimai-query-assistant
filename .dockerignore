@@ -1,0 +1,9 @@
+.git
+data
+output
+.env
+.env.*
+!.env.example
+node_modules
+local-config.json
+*-private.json

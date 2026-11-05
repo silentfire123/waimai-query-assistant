@@ -14,4 +14,9 @@ jobs:
       - run: node --check server.mjs
       - run: node --check poc.mjs
       - run: node --check web/app.js
+      - run: node --check waimai.mjs
+      - run: node --check collector.mjs
+      - run: node --check diagnostics.mjs
+      - run: node --check location.mjs
+      - run: node --check web/calculator.mjs
       - run: npm test

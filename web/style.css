@@ -452,3 +452,13 @@
   background:var(--warn-bg);
   border-color:var(--warn-line);
 }
+
+/* 新功能沿用原卡片与表单体系，不改变页面布局。 */
+.calculator{border-top:1px solid var(--line,#e5e7eb);margin-top:16px;padding-top:14px;min-width:0}
+.calculator label,.location-picker label{display:flex;flex-direction:column;gap:6px;font-size:13px;margin:10px 0}
+.calculator input,.calculator select,.location-picker input{box-sizing:border-box;max-width:100%;min-width:0;width:100%;border:1px solid #ccd1d8;border-radius:8px;padding:10px;font:inherit;background:#fff;color:inherit}
+.calculator .net{display:block;font-weight:600;margin:10px 0;line-height:1.7;overflow-wrap:anywhere}
+.calculator summary{cursor:pointer;font-size:13px}
+.manual-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}
+.address-option{display:block;width:100%;text-align:left;margin:6px 0;padding:10px;border:1px solid #dde1e5;border-radius:8px;background:white;cursor:pointer;font:inherit}
+@media(max-width:560px){.manual-fields{grid-template-columns:1fr}.calculator{width:100%}.calculator select{font-size:16px}}

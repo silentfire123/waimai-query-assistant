@@ -24,7 +24,7 @@ function fullRows(items) {
   return items.filter(p => Number(p.meituan_status) === 1 && p.store?.name
     && amount(p.meituan_user_rebate) > 0
     && available(p.meituan_left_number)).map(p => ({
-      name: p.store.name,
+      name: p.store.name, source: 'xiaochan',
       xiaochanStoreId: id(p.store.store_id), // 不能和 wm_poi_id 跨命名空间比较。
       meituanPoiId: id(p.meituan_poi_id ?? p.store.meituan_poi_id ?? p.store.wm_poi_id),
       promotionId: id(p.promotion_id),
@@ -41,7 +41,7 @@ function ratioRows(items) {
   return items.filter(p => p.name).flatMap(p => (p.plan_activity_info_list ?? [])
     .filter(a => number(a.ratio) > 0 && available(a.inventory))
     .map(a => ({
-      name: p.name, meituanPoiId: id(p.wm_poi_id), eventId: id(a.poi_event_id),
+      name: p.name, source: 'xiaochan', meituanPoiId: id(p.wm_poi_id), eventId: id(a.poi_event_id),
       ratioRaw: Number(a.ratio),
       ratioPercent: Number(a.ratio) / 100, // 参考客户端：原值 600 -> 显示 6%，不是 600%。
       userRatioPercent: number(a.user_ratio) == null ? null : Number(a.user_ratio) / 100,
@@ -56,7 +56,7 @@ function groupStores(rows) {
   const stores = new Map();
   for (const row of rows) {
     const key = row.meituanPoiId ? `mt:${row.meituanPoiId}`
-      : row.xiaochanStoreId ? `xc:${row.xiaochanStoreId}` : `name:${normalize(row.name)}`;
+      : row.waimaiStoreId ? `wm:${row.waimaiStoreId}` : row.xiaochanStoreId ? `xc:${row.xiaochanStoreId}` : `name:${normalize(row.name)}`;
     if (!stores.has(key)) stores.set(key, { name: row.name, meituanPoiId: row.meituanPoiId, activities: [] });
     const store = stores.get(key);
     if (!store.activities.some(a => JSON.stringify(a) === JSON.stringify(row))) store.activities.push(row);
@@ -64,14 +64,14 @@ function groupStores(rows) {
   return [...stores.values()];
 }
 
-export function compare(fullItems, ratioItems) {
-  const fullStores = groupStores(fullRows(fullItems));
-  const ratioStores = groupStores(ratioRows(ratioItems));
+export function compare(fullItems, ratioItems, channelActivities = {}) {
+  const fullStores = groupStores([...fullRows(fullItems), ...(channelActivities.full ?? [])]);
+  const ratioStores = groupStores([...ratioRows(ratioItems), ...(channelActivities.ratio ?? [])]);
   const matches = [], candidates = [];
   for (const full of fullStores) {
     const exact = full.meituanPoiId && ratioStores.find(r => r.meituanPoiId === full.meituanPoiId);
-    if (exact) { matches.push({ basis: '相同美团门店 ID', full, ratio: exact }); continue; }
-    const sameName = ratioStores.filter(r => normalize(r.name) === normalize(full.name)
+    if (exact) matches.push({ basis: '相同美团门店 ID', full, ratio: exact });
+    const sameName = ratioStores.filter(r => r !== exact && normalize(r.name) === normalize(full.name)
       && !(full.meituanPoiId && r.meituanPoiId && full.meituanPoiId !== r.meituanPoiId));
     for (const ratio of sameName) candidates.push({ basis: '完整店名相同，待核对门店', full, ratio });
   }
@@ -154,7 +154,7 @@ async function call(service, method, body, city, auth, listKey = 'feed_items', s
 }
 
 export async function queryLive(pages, { location, log = console.log } = {}) {
-  if (!Number.isInteger(pages) || pages < 1 || pages > 10) throw new Error('页数必须为 1 到 10 的整数');
+  if (!Number.isInteger(pages) || pages < 1 || pages > 20) throw new Error('页数必须为 1 到 20 的整数');
   let addr = location;
   if (!addr) {
     const config = JSON.parse(await fs.readFile(path.resolve(root, process.env.XC_CONFIG ?? '../waimai-helper/config.json'), 'utf8'));
@@ -187,6 +187,7 @@ export async function queryLive(pages, { location, log = console.log } = {}) {
           lat: Number(addr.lat), lon: Number(addr.lng), silk_id: Number(auth.silk),
           pv_id: pagePvId, scene: 1, app_id: 20,
         };
+        const pageStarted=Date.now();
         stats.requests++;
         const json = await call('SilkwormFusion', method, body, kind === 'full' ? Number(addr.adcode) : null, auth, listKey, sessionId);
         const items = json[listKey];
@@ -211,7 +212,7 @@ export async function queryLive(pages, { location, log = console.log } = {}) {
         }
         stats.stores = groupStores(kind === 'full' ? fullRows(output) : ratioRows(output)).length;
         const next = id(kind === 'full' ? json.page_pv_id : json.pv_id);
-        const pageStats = { request: page + 1, rawItems: items.length, classifiedItems: converted.length,
+        const pageStats = { request: page + 1, durationMs:Date.now()-pageStarted, rawItems: items.length, classifiedItems: converted.length,
           eligibleActivities: rows.length, filteredActivities: activityCount - rows.length, schemaRejectedItems, excludedProductItems: 0,
           newStores: stats.stores - previousStores, totalStores: stats.stores, duplicateContent,
           cursorPresent: next !== null, cursorChanged: next !== null && next !== pagePvId };
@@ -285,7 +286,7 @@ export function htmlReport(report) {
 }
 
 export function buildReport(data) {
-  const result = compare(data.full, data.ratio);
+  const result = compare(data.full, data.ratio, data.channelActivities);
   const status = data.source === 'demo' ? 'demo' : data.errors.length ? (result.counts.fullStores || result.counts.ratioStores ? 'partial' : 'blocked')
     : result.matches.length ? 'sample_overlap' : result.candidates.length ? 'candidates_only' : 'no_overlap_in_sample';
   const report = {
@@ -337,3 +338,14 @@ async function main() {
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main().catch(error => { console.error(`PoC 失败：${error.message}`); process.exitCode = 1; });
+
+export async function searchLocations(keyword) {
+ if(typeof keyword!=='string'||keyword.trim().length<2||keyword.length>80)throw Object.assign(Error('搜索词需为 2–80 个字符'),{status:400});
+ const auth=identity(),method='SilkwormLbsService.Suggestion';
+ const response=await fetch('https://gw.xiaocantech.com/rpc',{method:'POST',headers:headers('SilkwormLbs',method,null,auth,crypto.randomUUID()),body:JSON.stringify({silk_id:Number(auth.silk),keyword:keyword.trim(),region:'',page_size:20,page:1,app_id:20}),signal:AbortSignal.timeout(12000)});
+ if(!response.ok)throw Object.assign(Error('地址搜索上游不可用，请稍后重试或手动填写'),{status:502});
+ const json=await response.json();if(Number(json.status?.code)!==0)throw Object.assign(Error('地址搜索失败'),{status:502});
+ const rows=typeof json.result==='string'?JSON.parse(json.result):json.result;
+ if(!Array.isArray(rows))throw Object.assign(Error('地址搜索响应结构不符'),{status:502});
+ return rows.slice(0,20).map(a=>({label:String(a.title??'').slice(0,60),address:String(a.address??'').slice(0,160),lat:Number(a.location?.lat),lng:Number(a.location?.lng),adcode:Number(a.adcode),city:typeof a.city==='string'?a.city.trim().slice(0,40):undefined,coordinateSystem:'GCJ-02'})).filter(a=>a.label&&Number.isFinite(a.lat)&&Number.isFinite(a.lng)&&a.adcode>=100000);
+}
