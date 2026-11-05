@@ -282,3 +282,33 @@ test('商品活动：商品 ID 结构损坏时仍报异常，不能因通用 ID 
   assert.equal(report.pagination.full.schemaRejectedItems,7);
   assert.equal(report.status,'blocked');assert.equal(report.errors[0].code,'INVALID_FEED_ITEMS');
 });
+
+test('异常明细：报告保留商家名、具体缺失字段及已知返现，不记录原始敏感响应', async t => {
+  const missingThreshold={...feedStore('missing-threshold'),store:{id:'private-id',name:'测试湘菜（假日店）',address:'private-address'},user_rebate:600};
+  delete missingThreshold.order_money;
+  const missingStore={...feedStore('missing-store'),store:undefined};
+  const original=globalThis.fetch;
+  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
+    ?{feed_items:[feedStore('valid'),missingThreshold,missingStore]}:{list:[]});
+  t.after(()=>{globalThis.fetch=original;});
+  const report=buildReport(await queryLive(1,{location,log:()=>{}}));
+  const error=report.errors.find(e=>e.code==='INVALID_FEED_ITEMS');
+  assert.deepEqual(error.items,[
+    {storeName:'测试湘菜（假日店）',missingFields:['实付满返门槛'],rebate:6},
+    {storeName:'门店名称未返回',missingFields:['门店名称'],rebate:10},
+  ]);
+  assert.ok(error.message.includes('测试湘菜（假日店）'));assert.ok(error.message.includes('返现 ¥6'));
+  assert.equal(report.status,'partial');assert.equal(report.counts.fullStores,1);
+  assert.ok(!JSON.stringify(error).includes('private-address'));assert.ok(!JSON.stringify(error).includes('private-id'));
+});
+
+test('异常明细：商家名可随结果落盘恢复，报告 HTML 转义名称', async t => {
+  const issue={source:'full',code:'INVALID_FEED_ITEMS',items:[{storeName:'<script>测试店</script>',missingFields:['实付满返门槛'],rebate:6}],message:'<script>测试店</script>：缺少实付满返门槛（已知返现 ¥6）'};
+  const app=await setup(t,{collect:async()=>({...data(),errors:[issue]})});
+  await app.post('/api/location',location);await app.post('/api/query');const state=await app.done();
+  assert.equal(state.report.status,'partial');assert.deepEqual(state.attempt.errors[0].items,issue.items);
+  const saved=JSON.parse(await fs.readFile(path.join(app.dir,'latest.json'),'utf8'));
+  assert.deepEqual(saved.report.errors[0].items,issue.items);
+  assert.ok(!htmlReport(saved.report).includes('<script>测试店</script>'));
+  assert.ok(htmlReport(saved.report).includes('&lt;script&gt;测试店&lt;/script&gt;'));
+});

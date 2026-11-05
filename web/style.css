@@ -7,6 +7,8 @@
   --accent:#236447;
   --pale:#eaf2eb;
   --warn:#795215;
+  --warn-bg:#fcf6e9;
+  --warn-line:#dfca9f;
   --error:#9e342d;
   --radius:12px;
   color-scheme:light;
@@ -443,3 +445,10 @@
                                                                                                                                                                                                                                   .section-top{
                                                                                                                                                                                                                                     align-items:flex-start}
                                                                                                                                                                                                                                   }
+
+/* 部分结果不是整轮失败：保留一处可读的非阻断提醒。 */
+.notice.warning{
+  color:var(--warn);
+  background:var(--warn-bg);
+  border-color:var(--warn-line);
+}

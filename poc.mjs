@@ -129,7 +129,12 @@ function feedItems(items, kind, { onInvalid, onExcludedProduct } = {}) {
   const invalid = rows.filter(p => !p.store?.name || number(p.order_money) == null || number(p.user_rebate) == null);
   if (invalid.length) {
     if (!onInvalid) throw new Error('满返 feed 缺少门店或金额字段，不能当成空名单');
-    onInvalid(invalid.length);
+    onInvalid(invalid.length, invalid.map(p => ({
+      storeName: typeof p.store?.name === 'string' && p.store.name ? p.store.name.slice(0, 160) : '门店名称未返回',
+      missingFields: [!p.store?.name ? '门店名称' : null, number(p.order_money) == null ? '实付满返门槛' : null,
+        number(p.user_rebate) == null ? '返现金额' : null].filter(Boolean),
+      rebate: number(p.user_rebate) == null ? null : Number(p.user_rebate) / 100,
+    })));
   }
   return rows.map(p => ({
     ...p, store: { ...p.store, store_id: p.store?.id }, meituan_status: 1,
@@ -196,9 +201,11 @@ export async function queryLive(pages, { location, log = console.log } = {}) {
         const pageKey = JSON.stringify(items);
         const duplicateContent = seenPages.has(pageKey);
         let schemaRejectedItems = 0, excludedProductItems = 0;
-        const converted = kind === 'full' ? feedItems(items, kind, { onInvalid: count => {
+        const converted = kind === 'full' ? feedItems(items, kind, { onInvalid: (count, items) => {
           schemaRejectedItems = count;
-          errors.push({ source: kind, code: 'INVALID_FEED_ITEMS', message: `第 ${page + 1} 次响应有 ${count} 条满返活动缺少门店或金额字段，已排除这些活动并继续采集；本轮结果不完整` });
+          const detail = items.map(item => `${item.storeName}：缺少${item.missingFields.join('、')}${item.rebate == null ? '' : `（已知返现 ¥${item.rebate}）`}`).join('；');
+          errors.push({ source: kind, code: 'INVALID_FEED_ITEMS', items,
+            message: `第 ${page + 1} 次响应有 ${count} 条活动信息不全，未纳入比对。${detail}。其余名单仍可查看，重合结论可能漏项。` });
         }, onExcludedProduct: count => { excludedProductItems = count; } }) : items;
         if (kind === 'ratio' && converted.some(p => !p || !p.name || !Array.isArray(p.plan_activity_info_list))) throw new Error('比例返列表缺少 name 或 plan_activity_info_list，不能当成空名单');
         const rows = kind === 'full' ? fullRows(converted) : ratioRows(converted);

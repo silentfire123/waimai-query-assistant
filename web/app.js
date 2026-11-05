@@ -33,7 +33,7 @@ function renderList() {
   if (report) {
     if (search) { title = '没有找到这个名字'; detail = '试试更短的关键词，或切换到另一份名单。'; }
     else if (tab !== 'overlap') { title = '本次未取得有效名单'; detail = '请检查采集范围和错误信息；空名单不一定代表附近没有活动。'; }
-    else if (report.status === 'partial' || report.status === 'blocked') { title = '采集不完整，暂不能判断重合'; detail = '仍可切换查看已取得的名单。请先处理采集错误，再手动查询。'; }
+    else if (report.status === 'partial' || report.status === 'blocked') { title = '采集不完整，暂不能判断重合'; detail = '仍可切换查看已取得的名单。上方提醒会说明未取得或未纳入的活动；无需因缺字段而反复查询。'; }
     else { title = '本次样本暂未发现重合'; detail = '不代表附近没有重合商家。可以查看两侧名单；分页覆盖和异名门店仍可能影响结果。'; }
   }
   $('result-list').innerHTML = `<div class="empty">${emptyIcon}<h3>${title}</h3><p>${detail}</p></div>`;
@@ -76,15 +76,18 @@ function render() {
       return '';
     };
     const legacyActual = fullRead != null && ratioRead != null ? '本次实际读取：满返 ' + fullRead + '/' + limit + ' 页' + stopReason('full') + '；比例返 ' + ratioRead + '/' + limit + ' 页' + stopReason('ratio') + '。' : '';
-    const stops = { page_limit: '达到本次上限', empty_page: '返回空页', short_page: '响应不足一页', missing_cursor: '未提供下一页游标', no_progress: '连续两次无新增且游标未推进', waf: '上游拦截', error: '请求失败' };
+    const stops = { page_limit: '达到本次请求上限，非全部商家', empty_page: '返回空页', short_page: '响应不足一页', missing_cursor: '未提供下一页游标', no_progress: '连续两次无新增且游标未推进', waf: '上游拦截', error: '请求失败' };
     const actual = report.pagination ? ['full', 'ratio'].map(kind => {
       const stats = report.pagination[kind];
       return !stats ? `${kind === 'full' ? '满返' : '比例返'}未请求` : `${kind === 'full' ? '满返' : '比例返'}：计划最多 ${stats.plannedPages} 页，实际请求 ${stats.requests} 次，${stats.uniquePages} 个不同内容页，${stats.duplicatePages} 个重复响应，新增 ${stats.stores} 家（${stops[stats.stopReason] || '停止原因未知'}）`;
     }).join('；') + '。' + (report.pagination.full?.excludedProductItems ? `另有 ${report.pagination.full.excludedProductItems} 条商品活动未提供实付门槛，未纳入满返比对。` : '') : legacyActual;
-    $('scope-note').textContent = [!state.resultMatchesLocation ? '以下为历史结果，不对应当前设置的位置。重新查询后才会更新。' : '', report.status === 'partial' ? '本次只取得部分数据，重合结论不完整。下方可查看具体错误。' : '这是一次有限样本，不保证全量。增加页数不会扩大配送半径；重复内容不会增加商家数。接口比例未核对到账口径，不能据此保证实际返现。', actual].filter(Boolean).join(' ');
+    $('scope-note').textContent = [!state.resultMatchesLocation ? '以下为历史结果，不对应当前设置的位置。重新查询后才会更新。' : '', report.status === 'partial' ? '本次取得了部分名单，重合结论可能漏项。具体原因见上方提醒。' : '这是一次有限样本，不保证全量。增加页数不会扩大配送半径；重复内容不会增加商家数。接口比例未核对到账口径，不能据此保证实际返现。', actual].filter(Boolean).join(' ');
   }
   const attempt = state.attempt;
   const errors = !demo && attempt ? attempt.errors || [] : [];
+  const partialAttempt = attempt?.status === 'partial' && !attempt?.persistenceError;
+  $('attempt').className = partialAttempt ? 'notice warning' : 'notice error';
+  $('attempt').setAttribute('role', partialAttempt ? 'status' : 'alert');
   $('attempt').hidden = !errors.length && !attempt?.persistenceError || !!demo;
   $('attempt').textContent = errors.map(e => `${({full:'实付满返', ratio:'比例返', query:'查询'})[e.source] || e.source}：${e.message}`).join('；') + (attempt?.persistenceError ? '；' + attempt.persistenceError : '') + (errors.length && state.report && attempt?.generatedAt !== state.report.generatedAt ? '。未覆盖上次结果，以下仍为历史名单。' : '');
   const counts = report?.counts;
@@ -104,7 +107,8 @@ async function poll() {
   if (polling) return; polling = true;
   try {
     while (state?.busy) { await new Promise(r => setTimeout(r, 800)); state = await api('/api/state'); if (state.busy) renderQueryControls(); else render(); }
-    message(state.attempt?.errors?.length ? '本轮查询已结束，请查看采集错误。' : '查询完成，结果已保存在本机。', !!state.attempt?.errors?.length);
+    // 具体原因已显示在结果提醒中，不再叠加第二条通用报错。
+    message(state.attempt?.errors?.length || state.attempt?.persistenceError ? '' : '查询完成，结果已保存在本机。');
   } catch { message('服务连接中断；查询可能仍在运行。刷新页面可恢复查看。', true); }
   finally { polling = false; }
 }
