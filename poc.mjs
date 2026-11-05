@@ -15,18 +15,22 @@ const md5 = value => crypto.createHash('md5').update(value).digest('hex');
 const normalize = value => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[\s·・、，,。._/\\|—-]+/g, '');
 const number = value => value == null || value === '' || !Number.isFinite(Number(value)) ? null : Number(value);
 const id = value => value == null || value === '' || value === 0 || value === '0' || (typeof value === 'number' && !Number.isSafeInteger(value)) ? null : String(value);
+// 金额只接受明确的数值或非空数字字符串；布尔值、对象不能被隐式转换为返现。
+const amount = value => typeof value === 'number' || (typeof value === 'string' && value.trim()) ? number(value) : null;
 const available = value => number(value) !== 0; // 缺失或 -1 不自行解释为售罄。
 const escape = value => String(value ?? '—').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 function fullRows(items) {
   return items.filter(p => Number(p.meituan_status) === 1 && p.store?.name
-    && number(p.meituan_order_money) > 0 && number(p.meituan_user_rebate) > 0
+    && amount(p.meituan_user_rebate) > 0
     && available(p.meituan_left_number)).map(p => ({
       name: p.store.name,
       xiaochanStoreId: id(p.store.store_id), // 不能和 wm_poi_id 跨命名空间比较。
       meituanPoiId: id(p.meituan_poi_id ?? p.store.meituan_poi_id ?? p.store.wm_poi_id),
       promotionId: id(p.promotion_id),
-      minPay: Number(p.meituan_order_money) / 100,
+      rebateType: amount(p.meituan_order_money) > 0 ? 'threshold' : 'fixed',
+      minPay: amount(p.meituan_order_money) > 0 ? Number(p.meituan_order_money) / 100 : null,
+      productName: typeof p.store_product?.name === 'string' ? p.store_product.name.trim() : null,
       rebate: Number(p.meituan_user_rebate) / 100,
       inventory: number(p.meituan_left_number),
       condition: ({ 99: '无需评价', 2: '图文评价' })[p.rebate_condition] ?? `条件码 ${p.rebate_condition ?? '未知'}`,
@@ -105,7 +109,7 @@ function headers(service, method, city, auth, sessionId) {
 }
 
 // 满返 feed 的 source=1/2 均有确定金额活动；仍须 store_platform=1，未知来源不猜测。
-function feedItems(items, kind, { onInvalid, onExcludedProduct } = {}) {
+function feedItems(items, kind, { onInvalid } = {}) {
   if (items.some(item => !item || typeof item !== 'object' || Array.isArray(item))) throw new Error('feed_items 含非对象项，需核对响应结构');
   if (kind === 'ratio') {
     const rows = items.filter(p => Number(p.source) === 5);
@@ -113,27 +117,15 @@ function feedItems(items, kind, { onInvalid, onExcludedProduct } = {}) {
     return rows;
   }
   const selected = items.filter(p => [1, 2].includes(Number(p.source)) && Number(p.store_platform) === 1);
-  // 混合 feed 也包含有商品详情却无满返门槛的记录；商品价不能代替实付门槛。
-  const productItems = selected.filter(p => {
-    const product = p.store_product;
-    const productId = product?.detail?.jump_product_id;
-    const hasProductId = typeof productId === 'string' ? /^[1-9][0-9]*$/.test(productId)
-      : typeof productId === 'number' && Number.isSafeInteger(productId) && productId > 0;
-    return p.order_money == null && p.store?.name && number(p.user_rebate) != null
-      && Number(product?.product_type) === 1 && typeof product.name === 'string' && product.name.trim()
-      && hasProductId && number(product.detail?.sku_price) > 0;
-  });
-  if (productItems.length) onExcludedProduct?.(productItems.length);
-  const products = new Set(productItems);
-  const rows = selected.filter(p => !products.has(p));
-  const invalid = rows.filter(p => !p.store?.name || number(p.order_money) == null || number(p.user_rebate) == null);
+  // 用户口径：返现金额明确即纳入；无可用实付门槛时是固定返，不用商品价补门槛。
+  const rows = selected;
+  const invalid = rows.filter(p => !p.store?.name || amount(p.user_rebate) == null);
   if (invalid.length) {
     if (!onInvalid) throw new Error('满返 feed 缺少门店或金额字段，不能当成空名单');
     onInvalid(invalid.length, invalid.map(p => ({
       storeName: typeof p.store?.name === 'string' && p.store.name ? p.store.name.slice(0, 160) : '门店名称未返回',
-      missingFields: [!p.store?.name ? '门店名称' : null, number(p.order_money) == null ? '实付满返门槛' : null,
-        number(p.user_rebate) == null ? '返现金额' : null].filter(Boolean),
-      rebate: number(p.user_rebate) == null ? null : Number(p.user_rebate) / 100,
+      missingFields: [!p.store?.name ? '门店名称' : null, amount(p.user_rebate) == null ? '返现金额' : null].filter(Boolean),
+      rebate: amount(p.user_rebate) == null ? null : Number(p.user_rebate) / 100,
     })));
   }
   return rows.map(p => ({
@@ -200,13 +192,13 @@ export async function queryLive(pages, { location, log = console.log } = {}) {
         const items = json[listKey];
         const pageKey = JSON.stringify(items);
         const duplicateContent = seenPages.has(pageKey);
-        let schemaRejectedItems = 0, excludedProductItems = 0;
+        let schemaRejectedItems = 0;
         const converted = kind === 'full' ? feedItems(items, kind, { onInvalid: (count, items) => {
           schemaRejectedItems = count;
           const detail = items.map(item => `${item.storeName}：缺少${item.missingFields.join('、')}${item.rebate == null ? '' : `（已知返现 ¥${item.rebate}）`}`).join('；');
           errors.push({ source: kind, code: 'INVALID_FEED_ITEMS', items,
             message: `第 ${page + 1} 次响应有 ${count} 条活动信息不全，未纳入比对。${detail}。其余名单仍可查看，重合结论可能漏项。` });
-        }, onExcludedProduct: count => { excludedProductItems = count; } }) : items;
+        } }) : items;
         if (kind === 'ratio' && converted.some(p => !p || !p.name || !Array.isArray(p.plan_activity_info_list))) throw new Error('比例返列表缺少 name 或 plan_activity_info_list，不能当成空名单');
         const rows = kind === 'full' ? fullRows(converted) : ratioRows(converted);
         const activityCount = kind === 'full' ? converted.length : converted.reduce((sum, p) => sum + p.plan_activity_info_list.length, 0);
@@ -220,12 +212,12 @@ export async function queryLive(pages, { location, log = console.log } = {}) {
         stats.stores = groupStores(kind === 'full' ? fullRows(output) : ratioRows(output)).length;
         const next = id(kind === 'full' ? json.page_pv_id : json.pv_id);
         const pageStats = { request: page + 1, rawItems: items.length, classifiedItems: converted.length,
-          eligibleActivities: rows.length, filteredActivities: activityCount - rows.length, schemaRejectedItems, excludedProductItems,
+          eligibleActivities: rows.length, filteredActivities: activityCount - rows.length, schemaRejectedItems, excludedProductItems: 0,
           newStores: stats.stores - previousStores, totalStores: stats.stores, duplicateContent,
           cursorPresent: next !== null, cursorChanged: next !== null && next !== pagePvId };
         stats.pages.push(pageStats);
         for (const key of ['rawItems', 'classifiedItems', 'eligibleActivities', 'filteredActivities', 'schemaRejectedItems', 'excludedProductItems']) stats[key] += pageStats[key];
-        coverage.push(`${kind} 第${page + 1}次：原始 ${items.length} 条，识别 ${converted.length} 条本类记录，有效活动 ${rows.length} 条，过滤 ${pageStats.filteredActivities} 条；新增 ${pageStats.newStores} 家，累计 ${stats.stores} 家${excludedProductItems ? `；另有 ${excludedProductItems} 条商品活动未提供实付门槛，未纳入满返比对` : ''}${duplicateContent ? '；内容重复，已去重' : ''}`);
+        coverage.push(`${kind} 第${page + 1}次：原始 ${items.length} 条，识别 ${converted.length} 条本类记录，有效活动 ${rows.length} 条，过滤 ${pageStats.filteredActivities} 条；新增 ${pageStats.newStores} 家，累计 ${stats.stores} 家${duplicateContent ? '；内容重复，已去重' : ''}`);
         // 内容去重与翻页状态独立；相同列表也可能携带有效的新游标。
         pagePvId = next;
         if (!items.length) {
@@ -282,8 +274,11 @@ function validateInput(input) {
 export function htmlReport(report) {
   const displayTime = new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', dateStyle: 'medium', timeStyle: 'medium', hour12: false }).format(new Date(report.generatedAt)) + '（北京时间）';
   const ratioText = a => `接口比例 ${escape(a.ratioPercent)}% / 封顶 ${escape(a.maxCashback)} 元（${escape(a.condition)}）${a.userRatioPercent == null ? '' : '<br>用户比例字段 '+escape(a.userRatioPercent)+'% / 用户封顶字段 '+escape(a.userMaxCashback)+' 元'}`;
-  const listTable = (stores, kind) => `<details><summary>查看本次${kind === 'full' ? '满返' : '比例返'}名单（${stores.length} 家）</summary><table border="1" cellpadding="8"><thead><tr><th>完整店名</th><th>美团门店 ID</th><th>活动</th></tr></thead><tbody>${stores.map(s => '<tr><td>'+escape(s.name)+'</td><td>'+escape(s.meituanPoiId)+'</td><td>'+s.activities.map(a => kind === 'full' ? '满 '+escape(a.minPay)+' 返 '+escape(a.rebate)+' 元（'+escape(a.condition)+'）' : ratioText(a)).join('<br>')+'</td></tr>').join('') || '<tr><td colspan="3">本次无可展示数据，请先检查采集状态。</td></tr>'}</tbody></table></details>`;
-  const pairRows = rows => rows.map(({ basis, full, ratio }) => `<tr><td>${escape(full.name)}</td><td>${full.activities.map(a => `满 ${escape(a.minPay)} 返 ${escape(a.rebate)} 元（${escape(a.condition)}）`).join('<br>')}</td><td>${escape(ratio.name)}<br>门店 ID：${escape(ratio.meituanPoiId)}</td><td>${ratio.activities.map(ratioText).join('<br>')}</td><td>${escape(basis)}</td></tr>`).join('');
+  const fullText = a => (a.rebateType === 'fixed' || a.minPay == null
+    ? `固定返 ${escape(a.rebate)} 元（实付门槛未明确）`
+    : `满 ${escape(a.minPay)} 返 ${escape(a.rebate)} 元`) + (a.productName ? ` · 指定商品：${escape(a.productName)}` : '') + `（${escape(a.condition)}）`;
+  const listTable = (stores, kind) => `<details><summary>查看本次${kind === 'full' ? '满返' : '比例返'}名单（${stores.length} 家）</summary><table border="1" cellpadding="8"><thead><tr><th>完整店名</th><th>美团门店 ID</th><th>活动</th></tr></thead><tbody>${stores.map(s => '<tr><td>'+escape(s.name)+'</td><td>'+escape(s.meituanPoiId)+'</td><td>'+s.activities.map(a => kind === 'full' ? fullText(a) : ratioText(a)).join('<br>')+'</td></tr>').join('') || '<tr><td colspan="3">本次无可展示数据，请先检查采集状态。</td></tr>'}</tbody></table></details>`;
+  const pairRows = rows => rows.map(({ basis, full, ratio }) => `<tr><td>${escape(full.name)}</td><td>${full.activities.map(fullText).join('<br>')}</td><td>${escape(ratio.name)}<br>门店 ID：${escape(ratio.meituanPoiId)}</td><td>${ratio.activities.map(ratioText).join('<br>')}</td><td>${escape(basis)}</td></tr>`).join('');
   const table = rows => `<table border="1" cellpadding="8"><thead><tr><th>满返店名</th><th>实付满返</th><th>比例返店名</th><th>比例返活动</th><th>匹配依据</th></tr></thead><tbody>${pairRows(rows) || '<tr><td colspan="5">本次没有结果；请结合采集状态判断，不代表附近没有重合商家。</td></tr>'}</tbody></table>`;
   const state = ({ blocked: '采集失败，真实重合结论未验证', partial: '采集不完整，只能查看部分样本', sample_overlap: '本次样本存在同 ID 重合', candidates_only: '只有同名候选，尚无同 ID 证明', no_overlap_in_sample: '本次样本未发现重合', demo: '演示数据：仅验证脚本逻辑，不是真实店铺' })[report.status];
   return `<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>小蚕重合验证 PoC</title><body><h1>小蚕比例返 × 美团实付满返</h1><p><strong>${escape(state)}</strong></p><p>来源：${escape(report.source)}；生成时间：${escape(displayTime)}</p><p>满返 ${report.counts.fullStores} 家；比例返 ${report.counts.ratioStores} 家；同 ID 重合 ${report.counts.confirmed} 家；同名候选 ${report.counts.candidatePairs} 对。</p>${report.errors.map(e => `<p><strong>${escape(e.source)}：${escape(e.message)}</strong></p>`).join('')}<h2>同一美团门店 ID</h2>${table(report.matches)}<h2>仅店名相同，需要人工核对</h2>${table(report.candidates)}<h2>本次采集名单</h2>${listTable(report.fullStores, 'full')}${listTable(report.ratioStores, 'ratio')}<h2>验证边界</h2><ul>${report.notes.map(n => `<li>${escape(n)}</li>`).join('')}</ul><p>详细两侧名单及活动字段见同目录 JSON。此 PoC 不下单、不报名、不证明返现可叠加。</p></body></html>`;
@@ -296,6 +291,7 @@ export function buildReport(data) {
   const report = {
     source: data.source, status, generatedAt: new Date().toISOString(), ...(data.pagination ? { pagination: data.pagination } : {}), ...(data.protocol ? { protocol: data.protocol } : {}), ...result, errors: data.errors,
     notes: [
+      '实付满返名单含固定返：返现金额明确但实付门槛未明确时仍纳入；不代表无门槛，指定商品和评价等条件仍需核对。',
       '同 ID 重合只证明两类名单存在同一门店，不代表可同时报名、叠加到账或当前时段可用。',
       '同名候选保留完整分店名称，只统一空白、标点及全半角；不做品牌模糊匹配。已知美团 ID 不同不匹配。',
       '小蚕 store_id 与美团 wm_poi_id 是不同命名空间，不能比较数值是否相等。超出安全整数范围的数字 ID 不作为证据，导入时应使用字符串。',

@@ -15,7 +15,9 @@ function message(text, error = false) {
 }
 const emptyIcon = '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="19" cy="22" r="12"/><circle cx="29" cy="22" r="12"/><path d="M19 36v6m10-6v6"/></svg>';
 function fullActivities(store) {
-  return store.activities.map(a => `<li>实付满 <strong>¥${money(a.minPay)}</strong> 返 <strong>¥${money(a.rebate)}</strong> · ${esc(a.condition)}</li>`).join('');
+  return store.activities.map(a => `<li>${a.rebateType === 'fixed' || a.minPay == null
+    ? `固定返 <strong>¥${money(a.rebate)}</strong> · 实付门槛未明确`
+    : `实付满 <strong>¥${money(a.minPay)}</strong> 返 <strong>¥${money(a.rebate)}</strong>`}${a.productName ? ` · 指定商品：${esc(a.productName)}` : ''} · ${esc(a.condition)}</li>`).join('');
 }
 function ratioActivities(store) {
   return store.activities.map(a => `<li>接口比例 <strong>${money(a.ratioPercent)}%</strong>${a.maxCashback == null ? '' : ` · 接口封顶 ¥${money(a.maxCashback)}`}${a.userRatioPercent == null ? '' : ` · 用户字段 ${money(a.userRatioPercent)}%`}${a.userMaxCashback == null ? '' : ` · 用户封顶 ¥${money(a.userMaxCashback)}`} · ${esc(a.condition)}</li>`).join('');

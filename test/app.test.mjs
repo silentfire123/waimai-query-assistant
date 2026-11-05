@@ -164,7 +164,7 @@ test('有效分页：重复内容仍推进游标，并区分请求、内容、�
     const body=JSON.parse(opts.body);inputs.push(body.page_pv_id);calls++;
     const reachedThird=body.page_pv_id==='cursor-2';
     const items=Array.from({length:17},()=>feedStore(reachedThird?'b':'a'));
-    items.push({...feedStore('sold-out'),left_number:0},{...feedStore('bad-money'),order_money:0},{...feedStore('other-platform'),store_platform:2});
+    items.push({...feedStore('sold-out'),left_number:0},{...feedStore('bad-money'),user_rebate:0},{...feedStore('other-platform'),store_platform:2});
     return Response.json({feed_items:items,page_pv_id:calls===1?'cursor-1':calls===2?'cursor-2':null});
   };
   t.after(()=>{globalThis.fetch=original;});
@@ -197,7 +197,7 @@ test('有效分页：单条满返缺失金额不丢弃同页合法门店，报�
   const original=globalThis.fetch;let calls=0;
   globalThis.fetch=async(url,opts)=>{
     if(opts.headers.methodname!=='FusionService.GetFeedPromotions')return Response.json({list:[]});
-    calls++;const bad=feedStore('unknown');delete bad.order_money;
+    calls++;const bad=feedStore('unknown');delete bad.user_rebate;
     return Response.json({feed_items:calls===1?[bad,...Array.from({length:19},()=>feedStore('valid'))]:[feedStore('later')]});
   };
   t.after(()=>{globalThis.fetch=original;});
@@ -225,23 +225,26 @@ const productPromotion = (key, overrides = {}) => {
   delete item.order_money;
   return item;
 };
-test('商品活动：无满返门槛且有完整商品信息的条目单独排除，不误报采集失败', async t => {
+test('商品活动：无满返门槛的确切返现作为固定返纳入，不用商品价格补门槛', async t => {
   const original=globalThis.fetch;
   globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
     ?{feed_items:[feedStore('valid'),productPromotion('product-a'),productPromotion('product-b')]}
     :{list:[]});
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
-  assert.deepEqual(report.errors,[],'商品价格不是实付满返门槛，已识别商品活动应按范围排除');
-  assert.equal(report.status,'no_overlap_in_sample');assert.equal(report.counts.fullStores,1);
+  assert.deepEqual(report.errors,[],'商品价格不是实付满返门槛，但确切返现金额应保留');
+  assert.equal(report.status,'no_overlap_in_sample');assert.equal(report.counts.fullStores,3);
   assert.equal(report.fullStores[0].activities[0].minPay,30,'不能用商品价格补写满返门槛');
-  assert.equal(report.pagination.full.excludedProductItems,2);
-  assert.equal(report.pagination.full.classifiedItems,1);
+  assert.equal(report.pagination.full.excludedProductItems,0);
+  assert.equal(report.pagination.full.classifiedItems,3);
+  assert.equal(report.fullStores[1].activities[0].rebateType,'fixed');
+  assert.equal(report.fullStores[1].activities[0].minPay,null);
+  assert.equal(report.fullStores[1].activities[0].productName,'测试套餐');
   assert.equal(report.pagination.full.schemaRejectedItems,0);
-  assert.ok(report.notes.some(n=>n.includes('商品活动')&&n.includes('2')));
+  assert.ok(!report.notes.some(n=>n.includes('未纳入满返比对')));
 });
 
-test('商品活动：商品信息不能掩盖缺门店、缺返现或损坏金额等真实异常', async t => {
+test('商品活动：商品元数据不是返现资格条件，缺门店或返现金额仍报异常', async t => {
   const missingStore=productPromotion('no-store',{store:undefined});
   const missingRebate=productPromotion('no-rebate',{user_rebate:undefined});
   const damagedMoney={...productPromotion('bad-money'),order_money:'not-a-number'};
@@ -254,9 +257,9 @@ test('商品活动：商品信息不能掩盖缺门店、缺返现或损坏金�
     :{list:[]});
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
-  assert.equal(report.status,'partial');assert.equal(report.counts.fullStores,1);
+  assert.equal(report.status,'partial');assert.equal(report.counts.fullStores,5);
   assert.equal(report.pagination.full.excludedProductItems,0);
-  assert.equal(report.pagination.full.schemaRejectedItems,6);
+  assert.equal(report.pagination.full.schemaRejectedItems,2);
   assert.equal(report.errors[0].code,'INVALID_FEED_ITEMS');
 });
 test('商品活动：有明确实付满返门槛时仍保留，商品价不覆盖门槛', async t => {
@@ -270,7 +273,7 @@ test('商品活动：有明确实付满返门槛时仍保留，商品价不覆�
   assert.equal(report.pagination.full.excludedProductItems,0);
 });
 
-test('商品活动：商品 ID 结构损坏时仍报异常，不能因通用 ID 字符串化而放行', async t => {
+test('固定返：商品 ID 不作为满返准入条件或同店匹配依据', async t => {
   const items=[{},true,'   ',0,-1,Number.MAX_SAFE_INTEGER+1,'not-a-product-id'].map((value,index)=>{
     const p=productPromotion('invalid-id-'+index);p.store_product.detail.jump_product_id=value;return p;
   });
@@ -279,25 +282,26 @@ test('商品活动：商品 ID 结构损坏时仍报异常，不能因通用 ID 
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
   assert.equal(report.pagination.full.excludedProductItems,0);
-  assert.equal(report.pagination.full.schemaRejectedItems,7);
-  assert.equal(report.status,'blocked');assert.equal(report.errors[0].code,'INVALID_FEED_ITEMS');
+  assert.equal(report.pagination.full.schemaRejectedItems,0);
+  assert.equal(report.counts.fullStores,7);assert.deepEqual(report.errors,[]);
+  assert.ok(report.fullStores.every(s=>s.meituanPoiId===null));
 });
 
 test('异常明细：报告保留商家名、具体缺失字段及已知返现，不记录原始敏感响应', async t => {
-  const missingThreshold={...feedStore('missing-threshold'),store:{id:'private-id',name:'测试湘菜（假日店）',address:'private-address'},user_rebate:600};
-  delete missingThreshold.order_money;
+  const missingRebate={...feedStore('missing-threshold'),store:{id:'private-id',name:'测试湘菜（假日店）',address:'private-address'},user_rebate:600};
+  delete missingRebate.user_rebate;
   const missingStore={...feedStore('missing-store'),store:undefined};
   const original=globalThis.fetch;
   globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
-    ?{feed_items:[feedStore('valid'),missingThreshold,missingStore]}:{list:[]});
+    ?{feed_items:[feedStore('valid'),missingRebate,missingStore]}:{list:[]});
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
   const error=report.errors.find(e=>e.code==='INVALID_FEED_ITEMS');
   assert.deepEqual(error.items,[
-    {storeName:'测试湘菜（假日店）',missingFields:['实付满返门槛'],rebate:6},
+    {storeName:'测试湘菜（假日店）',missingFields:['返现金额'],rebate:null},
     {storeName:'门店名称未返回',missingFields:['门店名称'],rebate:10},
   ]);
-  assert.ok(error.message.includes('测试湘菜（假日店）'));assert.ok(error.message.includes('返现 ¥6'));
+  assert.ok(error.message.includes('测试湘菜（假日店）'));assert.ok(error.message.includes('缺少返现金额'));
   assert.equal(report.status,'partial');assert.equal(report.counts.fullStores,1);
   assert.ok(!JSON.stringify(error).includes('private-address'));assert.ok(!JSON.stringify(error).includes('private-id'));
 });
@@ -311,4 +315,66 @@ test('异常明细：商家名可随结果落盘恢复，报告 HTML 转义名�
   assert.deepEqual(saved.report.errors[0].items,issue.items);
   assert.ok(!htmlReport(saved.report).includes('<script>测试店</script>'));
   assert.ok(htmlReport(saved.report).includes('&lt;script&gt;测试店&lt;/script&gt;'));
+});
+
+
+test('固定返：无实付门槛但返现金额明确时纳入满返名单和同 ID 匹配，不误报或补造门槛', async t => {
+  const item={...feedStore('fixed'),store:{id:'xc-fixed',name:'测试固定返店'},meituan_poi_id:'mt-1',user_rebate:600};
+  delete item.order_money;
+  const original=globalThis.fetch;
+  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'?{feed_items:[item]}:{list:ratio});
+  t.after(()=>{globalThis.fetch=original;});
+  const report=buildReport(await queryLive(1,{location,log:()=>{}}));
+  assert.deepEqual(report.errors,[]);
+  assert.equal(report.counts.fullStores,1);assert.equal(report.counts.confirmed,1);
+  assert.equal(report.fullStores[0].activities[0].rebateType,'fixed');
+  assert.equal(report.fullStores[0].activities[0].minPay,null);
+  assert.equal(report.fullStores[0].activities[0].rebate,6);
+  assert.equal(report.pagination.full.schemaRejectedItems,0);
+});
+
+
+test('固定返展示：网页与导出报告保留金额、未知门槛、商品限制并转义', async () => {
+  const {runInNewContext}=await import('node:vm');
+  const activity={...full[0],meituan_order_money:undefined,meituan_user_rebate:600,store_product:{name:'套餐 <img src=x onerror=alert(1)>'}};
+  const report=buildReport({...data(),full:[activity]});
+  const html=htmlReport(report);
+  assert.equal(html.split('固定返 6 元（实付门槛未明确）').length-1,2,'导出的重合行和完整名单都应展示固定返金额');
+  assert.ok(html.includes('&lt;img'));assert.ok(!html.includes('<img'));
+  const source=await fs.readFile(new URL('../web/app.js',import.meta.url),'utf8');
+  const renderer=source.slice(0,source.indexOf('function ratioActivities'));
+  const rendered=runInNewContext(renderer+';fullActivities(store)',{store:report.fullStores[0]});
+  assert.ok(rendered.includes('固定返'));assert.ok(rendered.includes('¥6'));
+  assert.ok(rendered.includes('实付门槛未明确'));assert.ok(!rendered.includes('¥0'));assert.ok(!rendered.includes('¥null'));
+  assert.ok(rendered.includes('&lt;img'));assert.ok(!rendered.includes('<img'));
+});
+
+
+test('固定返：同店不同商品保留多条活动，重复活动去重，库存为零仍过滤', async t => {
+  const a=productPromotion('same',{store_product:{name:'套餐甲'}});
+  const b={...a,store_product:{name:'套餐乙'}};
+  const original=globalThis.fetch;
+  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
+    ?{feed_items:[a,a,b,{...productPromotion('sold'),left_number:0}]}:{list:[]});
+  t.after(()=>{globalThis.fetch=original;});
+  const report=buildReport(await queryLive(1,{location,log:()=>{}}));
+  assert.equal(report.counts.fullStores,1);assert.equal(report.fullStores[0].activities.length,2);
+  assert.deepEqual(report.fullStores[0].activities.map(a=>a.productName),['套餐甲','套餐乙']);
+  globalThis.fetch=original;
+  const app=await setup(t,{collect:async()=>({...data(),full:[{...full[0],meituan_order_money:null}]})});
+  await app.post('/api/location',location);await app.post('/api/query');await app.done();
+  const saved=JSON.parse(await fs.readFile(path.join(app.dir,'latest.json'),'utf8'));
+  assert.equal(saved.report.fullStores[0].activities[0].rebateType,'fixed');
+  assert.equal(saved.report.fullStores[0].activities[0].minPay,null);
+});
+
+test('固定返：布尔、对象、空白等不明确金额不能被转换为有效返现', async t => {
+  const original=globalThis.fetch;
+  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
+    ?{feed_items:[true,{},'   ',null,'not-money'].map((value,index)=>productPromotion('bad-'+index,{user_rebate:value}))}:{list:[]});
+  t.after(()=>{globalThis.fetch=original;});
+  const report=buildReport(await queryLive(1,{location,log:()=>{}}));
+  assert.equal(report.status,'blocked');assert.equal(report.counts.fullStores,0);
+  assert.equal(report.pagination.full.schemaRejectedItems,5);
+  assert.ok(report.errors[0].items.every(i=>i.missingFields.includes('返现金额')));
 });
