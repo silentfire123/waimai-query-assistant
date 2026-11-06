@@ -41,11 +41,15 @@ try{
  $zip=[IO.Compression.ZipFile]::Open("$build\unsigned.apk",'Update');try{[IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip,"$build\dex\classes.dex",'classes.dex')|Out-Null}finally{$zip.Dispose()}
  & "$BuildTools\zipalign.exe" -f -p 4 "$build\unsigned.apk" "$build\aligned.apk";Check 'APK alignment'
  if(-not(Test-Path -LiteralPath $SigningKey)){New-Item -ItemType Directory (Split-Path $SigningKey -Parent) -Force|Out-Null;& "$JavaHome\bin\keytool.exe" -genkeypair -keystore $SigningKey -storepass android -keypass android -alias androiddebugkey -dname 'CN=Waimai Local Test,O=Local Development,C=CN' -keyalg RSA -keysize 2048 -validity 10000;Check 'self-use test signing key'}
- $apk="$build\waimai-assistant-standalone-test.apk"
+ # Publish the final filename only after every signing and content check passes.
+ $apk="$build\candidate.apk"
  & "$JavaHome\bin\java.exe" -jar "$BuildTools\lib\apksigner.jar" sign --ks $SigningKey --ks-pass pass:android --ks-key-alias androiddebugkey --key-pass pass:android --out $apk "$build\aligned.apk";Check 'APK signing'
  & "$JavaHome\bin\java.exe" -jar "$BuildTools\lib\apksigner.jar" verify --verbose $apk;Check 'signature verification'
  & "$BuildTools\zipalign.exe" -c -p 4 $apk;Check 'alignment verification'
  & (Join-Path $PSScriptRoot 'verify-android-apk.ps1') -ApkPath $apk
+ $finalApk="$build\waimai-assistant-standalone-test.apk"
+ Move-Item -LiteralPath $apk -Destination $finalApk
+ $apk=$finalApk
  Get-FileHash -LiteralPath $apk -Algorithm SHA256|Format-List
  Write-Output "Built self-use TEST APK (not device-validated): $apk"
 }finally{Pop-Location}

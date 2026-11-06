@@ -25,6 +25,8 @@ test('APK成品检查：拒绝Windows反斜杠路径、缺资源、重复条目�
   {name:'空模块必须拒绝',change:items=>items.map(i=>i.name==='assets/www/platform.mjs'?{...i,text:''}:i),error:/Missing\/empty APK entry/},
   {name:'同名条目必须拒绝',change:items=>[...items,items[0]],error:/duplicate/},
   {name:'模块静态导入缺失必须拒绝',change:items=>items.map(i=>i.name==='assets/www/app.js'?{...i,text:"import {x} from './missing.mjs';"}:i),error:/Unresolved packaged reference/},
+  {name:'副作用导入缺失必须拒绝',change:items=>items.map(i=>i.name==='assets/www/app.js'?{...i,text:"import './missing.mjs';"}:i),error:/Unresolved packaged reference/},
+  {name:'单引号相对HTML引用缺失必须拒绝',change:items=>items.map(i=>i.name==='assets/www/index.html'?{...i,text:"<script src='./missing.js'></script>"}:i),error:/Unresolved packaged reference/},
   {name:'动态导入缺失必须拒绝',change:items=>items.map(i=>i.name==='assets/www/app.js'?{...i,text:"import('/missing.mjs');"}:i),error:/Unresolved packaged reference/},
   {name:'HTML引用缺失必须拒绝',change:items=>items.map(i=>i.name==='assets/www/index.html'?{...i,text:'<script src="/missing.js"></script>'}:i),error:/Unresolved packaged reference/},
   {name:'私有凭证文件必须拒绝',change:items=>[...items,{name:'assets/credentials.bin',text:'synthetic-not-a-real-secret'}],error:/Private\/config/},

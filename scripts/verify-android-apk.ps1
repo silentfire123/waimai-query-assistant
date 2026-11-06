@@ -12,15 +12,15 @@ try{
   $entry=$zip.GetEntry($name)
   if($null -eq $entry -or $entry.Length -eq 0){throw "Missing/empty APK entry: $name"}
  }
- # Validate the packaged HTML and module imports, not just source/build directories.
+ # Check literal local references in the packaged files (not a JS parser/runtime).
  foreach($entry in @($zip.Entries|Where-Object {$_.FullName -like 'assets/www/*' -and $_.FullName -match '\.(html|mjs|js)$'})){
   $reader=[IO.StreamReader]::new($entry.Open(),[Text.Encoding]::UTF8)
   try{$text=$reader.ReadToEnd()}finally{$reader.Dispose()}
-  if($entry.FullName.EndsWith('.html')){$references=[regex]::Matches($text,'(?:src|href)="(/[a-zA-Z0-9._-]+)"')}
-  else{$references=[regex]::Matches($text,'(?:from\s*|import\s*\()["''](\./[^"'']+|/[^"'']+)["'']')}
+  if($entry.FullName.EndsWith('.html')){$references=[regex]::Matches($text,'(?:src|href)\s*=\s*["'']((?:/|\./)?[a-zA-Z0-9._-]+)["'']')}
+  else{$references=[regex]::Matches($text,'(?:from\s*|import\s*\(\s*|import\s*)["''](\./[^"'']+|/[^"'']+)["'']')}
   foreach($reference in $references){$target=$reference.Groups[1].Value -replace '^\./','' -replace '^/','';if($null -eq $zip.GetEntry('assets/www/'+$target)){throw "Unresolved packaged reference: $($entry.FullName) -> $target"}}
  }
  $private=@($names|Where-Object {$_ -match '(^|/)(data|output|\.env|credentials|local-config)(/|\.|$)|\.(jks|keystore)$'})
  if($private.Count){throw 'Private/config/build material found in APK'}
- Write-Output "PASS: final APK paths, homepage, local module graph and private-file exclusions: $resolved"
+ Write-Output "PASS: final APK paths, homepage, literal local references and private-file exclusions: $resolved"
 }finally{$zip.Dispose()}
