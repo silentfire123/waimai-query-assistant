@@ -118,3 +118,5 @@ node poc.mjs --input .\responses-private.json
 可选配置见 .env.example；本地可执行 `node --env-file=.env server.mjs`。无需配置文件时 `npm start`。旧 8787 进程不会自动加载新源码，可另设 PORT=8788 启动；不要误以为旧页面已更新。歪麦匿名第三页实测要求登录，需服务端本人 WM_TOKEN；定位自动地址反查需 AMAP_KEY，否则搜索选点。不要在聊天提交 token。
 
 Dockerfile 是通用运行封装，不是免费云部署证明。默认仅本机绑定；公网必须配置 HTTPS PUBLIC_ORIGIN + 至少 16 字符 ACCESS_PASSWORD，并解决持久状态存储。当前没有已验收的每月 0 元云端地址。
+
+歪麦后续页登录接入说明见 WAIMAI-LOGIN.md。本机隐藏输入工具：scripts/waimai-login.ps1；仅准备验证流程，不代表独立App本人登录态已打通。
