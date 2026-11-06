@@ -49,9 +49,22 @@ npm test
 npm run android:assets
 ```
 
+## 首页加载修复：v0.1.0-test.2（2026-11-06）
+
+- 旧版 `test.1` 存在 Windows AAPT2 产物 ZIP 路径问题：条目是 `assets/www\index.html`，安卓读取的却是 `assets/www/index.html`，因此首页资源不存在并返回 403。签名校验通过不代表资源路径可读。
+- 构建现在在签名前将 ZIP 条目规范成正斜杠，并在签名后运行 `scripts/verify-android-apk.ps1`，检查最终 APK 的首页、模块引用、重复/非法路径及私有文件。
+- 修复包 `versionCode=2`，沿用原签名；建议直接覆盖安装，**不要先卸载或清除数据**。旧版 `test.1` 不应继续安装。
+- 对旧发布包运行门禁会失败；新包通过，16 个前端资源内容与旧包逐字节一致。新增 Windows ZIP 归档回归，覆盖反斜杠、缺首页/模块、空文件、重复条目、缺导入与私有文件。
+- 本次全量自动化测试 109/109 通过，无跳过。
+- 本次解决的是已复现的归档路径错误。仍未连接安卓设备，不能将 ZIP 检查称为真机首页加载验收。
+
+```powershell
+.\scripts\verify-android-apk.ps1 -ApkPath .\android\build\waimai-assistant-standalone-test.apk
+```
+
 ## 2026-11-06 验证状态与边界
 
-- 99 项 Node 测试通过：包含原有回归、手机本地状态机、文件恢复、查询锁、冷却、错误保留旧结果、诊断脱敏、定位与搜索调用约定。
+- 初版 99 项 Node 测试通过；本次额外加入最终 APK ZIP 门禁回归（Windows 运行，其他系统跳过该 Windows 专用套件）。原有采集/匹配/状态机测试保留。
 - JVM 加密交叉测试通过：MD5、AES 与 Node 字节一致、RSA 双向封装/解封装；只使用生成的虚构密钥。
 - JVM 网络策略测试通过：只读白名单放行，伪造域名、HTTP、用户信息、端口、路径穿越、fragment、未知方法拒绝。
 - APK 构建、对齐及 v2/v3 签名校验通过；这些只证明构建产物有效，**不证明 Android 实际运行可用**。
