@@ -1,0 +1,8 @@
+/* APK-only touch affordances; preserve the established web visual language. */
+button, .primary, select, input, summary, .text-button { min-height: 48px; }
+.text-button { display: inline-flex; align-items: center; justify-content: center; }
+.top { gap: 8px; flex-wrap: wrap; }
+.top .brand { min-height: 48px; }
+.top .text-button { min-width: 64px; }
+summary { align-content: center; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation: none !important; transition: none !important; } }

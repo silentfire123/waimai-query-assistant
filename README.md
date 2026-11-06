@@ -120,3 +120,7 @@ node poc.mjs --input .\responses-private.json
 Dockerfile 是通用运行封装，不是免费云部署证明。默认仅本机绑定；公网必须配置 HTTPS PUBLIC_ORIGIN + 至少 16 字符 ACCESS_PASSWORD，并解决持久状态存储。当前没有已验收的每月 0 元云端地址。
 
 歪麦后续页登录接入说明见 WAIMAI-LOGIN.md。本机隐藏输入工具：scripts/waimai-login.ps1；仅准备验证流程，不代表独立App本人登录态已打通。
+
+## 安卓独立自用版
+
+新增无需电脑常驻 / 云服务器的安卓迁移方案与构建脚本，见 [android/README.md](android/README.md)。当前为**自用测试版**，已构建和验证签名，尚无真机安装与接口验收。手机仍需联网查询；不把电脑凭证或缓存放入 APK。

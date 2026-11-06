@@ -1,3 +1,4 @@
+import {getConfig,fetchUpstream as fetch} from './platform.mjs';
 // 浏览器 Geolocation 返回 WGS84；地址搜索与活动查询使用 GCJ-02。
 export function toGcj02(lat,lng) {
  if(!Number.isFinite(lat)||!Number.isFinite(lng)||Math.abs(lat)>90||Math.abs(lng)>180)throw Error('无效坐标');
@@ -16,7 +17,7 @@ export function toGcj02(lat,lng) {
  dLng=dLng*180/(6378245/Math.sqrt(magic)*Math.cos(rad)*pi);
  return {lat:lat+dLat,lng:lng+dLng};
 }
-export async function reverseLocation(input,{fetchImpl=fetch,key=process.env.AMAP_KEY}={}) {
+export async function reverseLocation(input,{fetchImpl=fetch,key=getConfig('AMAP_KEY')}={}) {
  const p=toGcj02(input.lat,input.lng);
  if(!key)throw Object.assign(Error('已获取坐标；自动地址核对需在服务端配置 AMAP_KEY。也可搜索地址选点，查询尚未开始。'),{status:503});
  const url=new URL('https://restapi.amap.com/v3/geocode/regeo');url.search=new URLSearchParams({key,location:p.lng+','+p.lat,extensions:'base',output:'JSON'});

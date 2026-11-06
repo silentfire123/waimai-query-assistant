@@ -6,6 +6,7 @@ const money = v => Number.isFinite(v) ? Number(v).toLocaleString('zh-CN', { maxi
 const time = v => v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) + ' 北京时间' : '未知时间';
 let state = null, demo = null, tab = 'overlap', polling = false, localError = '', connected = false;
 async function api(route, value) {
+  if (globalThis.mobileApp) return globalThis.mobileApp.request(route, value);
   const response = await fetch(route, value === undefined ? {} : { method:'POST', headers:{'Content-Type':'application/json', 'X-CSRF-Token':state?.csrfToken ?? ''}, body:JSON.stringify(value) });
   const data = await response.json();
   if (!response.ok) throw new Error(data.error || '请求失败，请稍后再试');
@@ -54,7 +55,7 @@ function render() {
   const report = demo || state.report;
   const location = state.location;
   $('location-name').textContent = location?.label || '尚未设置';
-  $('location-detail').textContent = location ? `${location.lat}, ${location.lng} · ${location.adcode}` : '位置仅保存在这台电脑';
+  $('location-detail').textContent = location ? `${location.lat}, ${location.lng} · ${location.adcode}` : globalThis.mobileApp ? '位置仅保存在这台手机' : '位置仅保存在这台电脑';
   $('edit-location').textContent = location ? '修改位置' : '设置位置';
   $('edit-location').disabled = state.busy;
   $('import-location').disabled = state.busy;
@@ -106,8 +107,8 @@ function render() {
   renderList();
 }
 async function refresh() {
-  try { state = await api('/api/state'); $('retry-connect').hidden=true; if(!connected){message('');connected=true;} if (localError) { message('本地服务已恢复'); localError = ''; } render(); if (state.busy) poll(); }
-  catch (e) { localError = e.message; $('retry-connect').hidden=false; message('服务暂未连接，可能正在唤醒。请稍后点击重试；本地使用时请确认启动窗口仍在运行。', true); }
+  try { state = await api('/api/state'); $('retry-connect').hidden=true; if(!connected){message('');connected=true;} if (localError) { message(globalThis.mobileApp ? '手机本地数据已恢复' : '本地服务已恢复'); localError = ''; } render(); if (state.busy) poll(); }
+  catch (e) { localError = e.message; $('retry-connect').hidden=false; message(globalThis.mobileApp ? '手机本地存储暂不可用，请稍后重试。' : '服务暂未连接，可能正在唤醒。请稍后点击重试；本地使用时请确认启动窗口仍在运行。', true); }
 }
 async function poll() {
   if (polling) return; polling = true;
@@ -115,7 +116,7 @@ async function poll() {
     while (state?.busy) { await new Promise(r => setTimeout(r, 800)); state = await api('/api/state'); if (state.busy) renderQueryControls(); else render(); }
     // 具体原因已显示在结果提醒中，不再叠加第二条通用报错。
     message(state.attempt?.errors?.length || state.attempt?.persistenceError ? '' : '查询完成，结果已保存在本机。');
-  } catch { message('服务连接中断；查询可能仍在运行。刷新页面可恢复查看。', true); }
+  } catch { message(globalThis.mobileApp ? '查询状态读取失败，请稍后刷新查看；请保持应用在前台。' : '服务连接中断；查询可能仍在运行。刷新页面可恢复查看。', true); }
   finally { polling = false; }
 }
 $('edit-location').addEventListener('click', () => {
@@ -184,9 +185,12 @@ $('search-address').onclick=async()=>{
 };
 $('locate-once').onclick=()=>{
  const status=$('location-status'),button=$('locate-once');
- if(!navigator.geolocation){status.textContent='浏览器不支持定位，请搜索地址选点。';return;}
- button.disabled=true;status.textContent='等待浏览器定位授权，仅获取一次；不会自动查询活动。';
- navigator.geolocation.getCurrentPosition(async position=>{
+ if(!globalThis.mobileApp && !navigator.geolocation){status.textContent='浏览器不支持定位，请搜索地址选点。';return;}
+ button.disabled=true;status.textContent=globalThis.mobileApp?'等待手机定位授权，仅获取一次；不会自动查询活动。':'等待浏览器定位授权，仅获取一次；不会自动查询活动。';
+ const getPosition = globalThis.mobileApp
+  ? (success, failure) => globalThis.mobileApp.locate().then(coords=>success({coords}),failure)
+  : (success, failure, options) => navigator.geolocation.getCurrentPosition(success, failure, options);
+ getPosition(async position=>{
   try{const result=await api('/api/location-reverse',{lat:position.coords.latitude,lng:position.coords.longitude});previewLocation(result.location);}
   catch(e){status.textContent=e.message+' 可搜索地址纠正。';}
   finally{button.disabled=false;}
@@ -197,6 +201,6 @@ $('retry-connect').onclick=()=>refresh();
 
 $('export-diagnostic').addEventListener('click',async event=>{
  event.preventDefault();
- try{const data=await api('/api/diagnostics');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='diagnostic.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+ try{const data=await api('/api/diagnostics');if(globalThis.mobileApp){await globalThis.mobileApp.exportDiagnostic(data);message('诊断已保存到选择的位置。');return;}const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='diagnostic.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
  catch(error){message(error.message,true);}
 });

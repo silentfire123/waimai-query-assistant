@@ -1,13 +1,13 @@
-import {queryLive} from './poc.mjs';
+import {queryLive} from './core.mjs';
 import {queryWaimai} from './waimai.mjs';
-import fs from 'node:fs/promises';
+import {readResourceJson} from './platform.mjs';
 export async function collectAll(pages,options={}) {
   const started=Date.now();
   let xc;
   try {xc=await queryLive(pages,options);}catch{xc={source:'live',full:[],ratio:[],errors:['full','ratio'].map(source=>({source,code:'XIAOCHAN_UNAVAILABLE',message:'小蚕配置或请求失败，歪麦仍会继续；请检查服务端本人身份配置'})),coverage:[],pagination:{}};}
   let location=options.location;
   if(!location?.city){
-    const cities=JSON.parse(await fs.readFile(new URL('./cities.json',import.meta.url),'utf8'));
+    const cities=await readResourceJson('cities.json');
     location={...location,city:cities[String(location?.adcode)]};
   }
   const xcMs=Date.now()-started;

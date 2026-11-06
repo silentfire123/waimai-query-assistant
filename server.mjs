@@ -44,7 +44,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(ro
     const prior = await readJson(path.join(root, 'output/live/result.json'), null);
     if (prior?.source === 'live') snapshot.report = { ...prior, context: { locationLabel: '旧 PoC 已选位置（尚未关联当前设置）', locationKey: null } };
   }
-  const codeVersion = crypto.createHash('sha256').update((await Promise.all(['server.mjs','poc.mjs','waimai.mjs','collector.mjs','diagnostics.mjs','location.mjs','web/app.js','web/calculator.mjs','cities.json','web/index.html','web/style.css'].map(name=>fs.readFile(path.join(root,name))))).map(b=>b.toString()).join('')).digest('hex').slice(0,12);
+  const codeVersion = crypto.createHash('sha256').update((await Promise.all(['core.mjs','platform.mjs','waimai-client.node.mjs','diagnostic-core.mjs','server.mjs','poc.mjs','waimai.mjs','collector.mjs','diagnostics.mjs','location.mjs','web/app.js','web/calculator.mjs','cities.json','web/index.html','web/style.css'].map(name=>fs.readFile(path.join(root,name))))).map(b=>b.toString()).join('')).digest('hex').slice(0,12);
   let latestDiagnostic = null, locationNextAt=0;
   try {const dir=path.join(dataDir,'query-diagnostics');const names=(await fs.readdir(dir)).filter(n=>n.endsWith('.json')).sort().reverse();if(names[0])latestDiagnostic=await readJson(path.join(dir,names[0]),null);} catch { /* 最近诊断缺失不影响启动。 */ }
   if(snapshot.attempt?.status==='running') snapshot.attempt={...snapshot.attempt,status:'blocked',errors:[{source:'query',message:'服务曾在查询中重启，请手动重试；上次结果保留'}]};

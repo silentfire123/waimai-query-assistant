@@ -9,3 +9,9 @@ node_modules/
 *.log
 *.tmp
 .impeccable/
+
+android/build/
+android/local.properties
+android/.gradle/
+*.jks
+*.keystore
