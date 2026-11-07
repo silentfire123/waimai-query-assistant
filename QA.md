@@ -56,3 +56,5 @@ Node 测试使用虚构数据和上游边界替身，覆盖采集／分页／匹
 - 使用既有工具与原测试密钥完整构建，无新依赖；构建日志`output/release-1.0.4-build.log`。v2/v3签名、对齐、最终资源／引用／隐私排除门禁通过，证书SHA-256与旧1.0.3一致；检查日志`output/release-1.0.4-apk-check.log`。
 - 新包`output/android/1.0.4/waimai-assistant-1.0.4.apk`，SHA-256：`fb835ced931b9f17f37e83223730ba26b0c598ec746488dc7d4d0902f2903051`，另有SHA256SUMS.txt；旧版文件未覆盖。
 - 复用本轮相同业务源码的桌面／375px手机合成QA证据。未声称浏览器合成桥接等于最终APK在iQOO 15真机运行；真实位置／网络、系统授权与覆盖升级数据保留仍待验收。
+
+- 发布复核：已于 2026-11-07 21:56:51（Asia/Shanghai）发布GitHub 1.0.4自用测试版；标签指向`552bf0e049c52b048e1ad272e84b559afd575865`，APK与SHA256SUMS.txt已上传且远端摘要与本地一致，旧版Release和APK保留。

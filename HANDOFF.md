@@ -49,3 +49,5 @@
 - `scripts/waimai-session.mjs` 是既有显式本人凭证三页验证工具，和产品两页采集解耦，以保持原工具兼容；本轮未实际运行凭证路径、未新增登录接入。不要把工具的三页授权验证能力误传给 collectAll。
 - 回归150/150；生产Java编译、JVM协议/白名单17项、Android公共资源打包通过；桌面/375px手机浏览器为合成桥接，非真机。详情与证据见 [实施记录](docs/overlap-coverage-implementation-2026-11-07.md)。
 - 后续收到提交、推送和更新Release授权，已递增为1.0.4 / versionCode=7，完成新APK构建、v2/v3签名、同1.0.3证书及最终APK资源门禁。旧APK不覆盖，真机仍未验收；发布状态与证据见 [1.0.4发布说明](docs/release-1.0.4.md)。
+
+- 已于 2026-11-07 21:56:51（Asia/Shanghai）发布GitHub 1.0.4自用测试版；标签指向`552bf0e049c52b048e1ad272e84b559afd575865`，APK与SHA256SUMS.txt已上传且远端摘要与本地一致，旧版Release和APK保留。
