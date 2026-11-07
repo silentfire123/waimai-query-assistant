@@ -1,6 +1,6 @@
 {
   "name": "waimai-query-assistant",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "private": true,
   "type": "module",
   "description": "外卖查询助手：小蚕与歪麦多渠道只读查询和返后净支出试算",

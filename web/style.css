@@ -462,3 +462,12 @@
 .manual-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 12px}
 .address-option{display:block;width:100%;text-align:left;margin:6px 0;padding:10px;border:1px solid #dde1e5;border-radius:8px;background:white;cursor:pointer;font:inherit}
 @media(max-width:560px){.manual-fields{grid-template-columns:1fr}.calculator{width:100%}.calculator select{font-size:16px}}
+
+/* 提示保留风险摘要；原生 details 提供键盘操作和展开状态。 */
+.notice summary{cursor:pointer;display:list-item;overflow-wrap:anywhere}
+.notice summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px;border-radius:2px}
+.notice-detail{margin-top:12px;overflow-wrap:anywhere}
+.disclosure-toggle{white-space:nowrap;font-size:12px;margin-left:8px;text-decoration:underline;text-underline-offset:3px}
+.disclosure-toggle::after{content:'展开详情'}
+details[open]>summary>.disclosure-toggle::after{content:'收起详情'}
+button:disabled{cursor:not-allowed}

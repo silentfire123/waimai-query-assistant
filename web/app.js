@@ -5,6 +5,8 @@ const esc = v => String(v ?? '—').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<'
 const money = v => Number.isFinite(v) ? Number(v).toLocaleString('zh-CN', { maximumFractionDigits: 2 }) : '待核对';
 const time = v => v ? new Date(v).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) + ' 北京时间' : '未知时间';
 let state = null, demo = null, tab = 'overlap', polling = false, localError = '', connected = false;
+let locationOperation = '', locationReadyAt = 0, locationCandidate = false;
+let scopeNoticeKey, attemptNoticeKey;
 async function api(route, value) {
   if (globalThis.mobileApp) return globalThis.mobileApp.request(route, value);
   const response = await fetch(route, value === undefined ? {} : { method:'POST', headers:{'Content-Type':'application/json', 'X-CSRF-Token':state?.csrfToken ?? ''}, body:JSON.stringify(value) });
@@ -46,7 +48,7 @@ function renderList() {
 function renderQueryControls() {
   const location = state.location;
   const wait = Math.max(0, Math.ceil((state.nextAllowedAt - Date.now()) / 1000));
-  $('query').disabled = state.busy || wait > 0 || !location;
+  $('query').disabled = state.busy || !!locationOperation || wait > 0 || !location;
   $('query').firstChild.textContent = state.busy ? '正在查询…' : wait ? `${wait} 秒后可查询` : '查询重合商家';
   $('query-hint').textContent = state.busy ? state.progress || '正在获取活动名单…' : wait ? '稍作等待，减少接口压力' : '手动查询 · 不会自动刷新接口';
 }
@@ -59,7 +61,7 @@ function render() {
   $('edit-location').textContent = location ? '修改位置' : '设置位置';
   $('edit-location').disabled = state.busy;
   $('import-location').disabled = state.busy;
-  $('location-form').querySelector('button[type=submit]').disabled = state.busy;
+  renderLocationControls();
   $('pages').disabled = state.busy;
   renderQueryControls();
   $('result-meta').textContent = report ? `${report.source === 'demo' ? '虚构演示' : report.source === 'live' ? '真实接口数据' : '导入数据'} · ${time(report.generatedAt)}${report.context ? ' · ' + report.context.locationLabel : ''}` : '还没有查询结果';
@@ -87,7 +89,10 @@ function render() {
       if(kind==='waimai')return stats ? '歪麦：计划最多 '+stats.plannedPages+' 页，实际请求 '+stats.requests+' 次，累计新增 '+stats.stores+' 家（'+(stops[stats.stopReason] || stats.stopReason)+'）' : '歪麦未请求';
       return !stats ? `${kind === 'full' ? '满返' : '比例返'}未请求` : `${kind === 'full' ? '满返' : '比例返'}：计划最多 ${stats.plannedPages} 页，实际请求 ${stats.requests} 次，${stats.uniquePages} 个不同内容页，${stats.duplicatePages} 个重复响应，新增 ${stats.stores} 家（${stops[stats.stopReason] || '停止原因未知'}）`;
     }).join('；') + '。' + (report.pagination.full?.excludedProductItems ? `另有 ${report.pagination.full.excludedProductItems} 条商品活动未提供实付门槛，未纳入满返比对。` : '') : legacyActual;
-    $('scope-note').textContent = [!state.resultMatchesLocation ? '以下为历史结果，不对应当前设置的位置。重新查询后才会更新。' : '', report.status === 'partial' ? '本次取得了部分名单，重合结论可能漏项。具体原因见上方提醒。' : '这是一次有限样本，不保证全量。增加页数不会扩大配送半径；重复内容不会增加商家数。接口比例未核对到账口径，不能据此保证实际返现。', actual].filter(Boolean).join(' ');
+    const scopeKey = state.attempt?.context?.queryId ?? state.attempt?.generatedAt ?? report.context?.queryId ?? report.generatedAt;
+    if (scopeNoticeKey !== scopeKey) { $('scope-note').open = false; scopeNoticeKey = scopeKey; }
+    $('scope-summary').textContent = !state.resultMatchesLocation ? '历史结果，与当前位置不同 · 采集范围与统计' : '采集范围与统计 · 有限样本，非全量';
+    $('scope-detail').textContent = [!state.resultMatchesLocation ? '以下为历史结果，不对应当前设置的位置。重新查询后才会更新。' : '', report.status === 'partial' ? '本次取得了部分名单，重合结论可能漏项。具体原因见上方提醒。' : '这是一次有限样本，不保证全量。增加页数不会扩大配送半径；重复内容不会增加商家数。接口比例未核对到账口径，不能据此保证实际返现。', actual].filter(Boolean).join(' ');
   }
   const attempt = state.attempt;
   const errors = !demo && attempt ? attempt.errors || [] : [];
@@ -95,7 +100,14 @@ function render() {
   $('attempt').className = partialAttempt ? 'notice warning' : 'notice error';
   $('attempt').setAttribute('role', partialAttempt ? 'status' : 'alert');
   $('attempt').hidden = !errors.length && !attempt?.persistenceError || !!demo;
-  $('attempt').textContent = errors.map(e => `${({full:'小蚕实付满返', ratio:'小蚕比例返', waimai:'歪麦', query:'查询'})[e.source] || e.source}：${e.message}${e.upstreamCode ? `（上游业务码 ${esc(e.upstreamCode)}）` : ''}`).join('；') + (attempt?.persistenceError ? '；' + attempt.persistenceError : '') + (errors.length && state.report && attempt?.generatedAt !== state.report.generatedAt ? '。未覆盖上次结果，以下仍为历史名单。' : '');
+  const attemptText = errors.map(e => `${({full:'小蚕实付满返', ratio:'小蚕比例返', waimai:'歪麦', query:'查询'})[e.source] || e.source}：${e.message}${e.upstreamCode ? `（上游业务码 ${esc(e.upstreamCode)}）` : ''}`).join('；') + (attempt?.persistenceError ? '；' + attempt.persistenceError : '') + (errors.length && state.report && attempt?.generatedAt !== state.report.generatedAt ? '。未覆盖上次结果，以下仍为历史名单。' : '');
+  const attemptKey = attempt?.context?.queryId ?? attempt?.generatedAt;
+  if (attemptNoticeKey !== attemptKey) { $('attempt-details').open = false; attemptNoticeKey = attemptKey; }
+  $('attempt-summary').textContent = '部分渠道失败，名单可能不完整';
+  $('attempt-details').hidden = !partialAttempt;
+  $('attempt-detail').textContent = partialAttempt ? attemptText : '';
+  $('attempt-critical').hidden = !!partialAttempt;
+  $('attempt-critical').textContent = partialAttempt ? '' : attemptText;
   $('query-id').textContent=state.attempt?.context?.queryId ? '查询编号 '+state.attempt.context.queryId+' · 代码版本 '+(state.codeVersion??'未知') : '代码版本 '+(state.codeVersion??'未知');
   const counts = report?.counts;
   $('count-overlap').textContent = counts ? `${counts.confirmed} 确认 / ${counts.candidatePairs} 待确认` : '0';
@@ -121,11 +133,11 @@ async function poll() {
 }
 $('edit-location').addEventListener('click', () => {
   $('location-form').hidden = !$('location-form').hidden;
-  if (!$('location-form').hidden) { for (const key of ['label','lat','lng','adcode','city']) $('location-form').elements[key].value = state?.location?.[key] ?? ''; $('location-form').elements.label.focus(); }
+  if (!$('location-form').hidden) { for (const key of ['label','lat','lng','adcode','city']) $('location-form').elements[key].value = state?.location?.[key] ?? ''; locationCandidate = false; $('address-results').replaceChildren(); (globalThis.mobileApp ? $('address-keyword') : $('location-form').elements.label).focus(); renderLocationControls(); }
 });
 $('cancel-location').onclick = () => { $('location-form').hidden = true; $('edit-location').focus(); };
 $('location-form').addEventListener('submit', async event => {
-  event.preventDefault(); const form = event.currentTarget; const value = Object.fromEntries(new FormData(form));
+  event.preventDefault(); if (state.busy || locationOperation || (globalThis.mobileApp && !locationCandidate)) return; const form = event.currentTarget; const value = Object.fromEntries(new FormData(form));
   try { state = await api('/api/location', value); form.hidden = true; message('位置已保存，仅用于后续查询。'); render(); $('query').focus(); }
   catch(e) { message(e.message, true); }
 });
@@ -142,7 +154,7 @@ $('demo').onclick = async () => { try { demo = await api('/api/demo'); $('search
 $('leave-demo').onclick = () => { demo = null; $('search').value = ''; render(); };
 $('search').addEventListener('input', renderList);
 document.querySelectorAll('[data-tab]').forEach(button => button.onclick = () => { tab = button.dataset.tab; $('search').value = ''; render(); });
-setInterval(() => { if (state && !state.busy && state.nextAllowedAt > Date.now() - 1500) renderQueryControls(); }, 1000);
+setInterval(() => { if (!state) return; renderLocationControls(); if (!state.busy && state.nextAllowedAt > Date.now() - 1500) renderQueryControls(); }, 250);
 refresh();
 
 function calculatorMarkup(match,index){
@@ -171,22 +183,51 @@ function bindCalculator(match,index){
  panel.querySelector('[data-reset]').onclick=()=>{automatic=true;update();};refill();update();
 }
 
+function renderLocationControls() {
+ const wait = Math.max(0, Math.ceil((locationReadyAt - Date.now()) / 1000));
+ const active = !!locationOperation, locked = !state || !!state.busy || active || wait > 0;
+ $('search-address').disabled = locked;
+ $('locate-once').disabled = locked;
+ $('search-address').textContent = locationOperation === 'search' ? '正在搜索…' : '搜索选点';
+ $('locate-once').textContent = locationOperation === 'locate' ? '正在定位…' : '获取当前位置（仅一次）';
+ $('location-form').querySelector('button[type=submit]').disabled = !state || !!state.busy || active || (!!globalThis.mobileApp && !locationCandidate);
+ $('address-results').children && Array.from($('address-results').children).forEach(button => { button.disabled = !!state?.busy || active; });
+ $('edit-location').disabled = !!state?.busy || active;
+ const hint = $('location-operation');
+ hint.hidden = !active && !wait;
+ hint.textContent = active ? (locationOperation === 'locate' ? '正在获取并保存当前位置，请等待完成后再搜索。' : '正在搜索地址，请等待完成后再定位。') : wait ? wait + ' 秒后可再次搜索或定位；请选择候选地址后保存。' : '';
+}
+function beginLocationOperation(kind) {
+ if (!state || state.busy || locationOperation || Date.now() < locationReadyAt) return false;
+ locationOperation = kind; renderLocationControls(); renderQueryControls(); return true;
+}
+function finishLocationOperation() {
+ locationOperation = '';
+ if (globalThis.mobileApp) locationReadyAt = Date.now() + 1500;
+ renderLocationControls(); renderQueryControls();
+}
 function previewLocation(location){
+ if (locationOperation || state?.busy) return;
  const form=$('location-form');form.hidden=false;
  for(const key of ['label','lat','lng','adcode','city'])form.elements[key].value=location[key]??'';
+ locationCandidate = true; renderLocationControls();
  $('location-status').textContent='请核对地址：'+location.label+'。确认后保存，再手动点击查询。';
 }
 $('search-address').onclick=async()=>{
- const button=$('search-address');button.disabled=true;$('location-status').textContent='正在搜索地址…';$('address-results').replaceChildren();
+ if (!beginLocationOperation('search')) return;
+ $('location-status').textContent='正在搜索地址…';
  try{const data=await api('/api/location-search',{keyword:$('address-keyword').value});
-  $('location-status').textContent=data.locations.length?'请选择并核对位置；不会自动查询活动。':'没有找到地址，请补充城市名称。';
+  $('address-results').replaceChildren(); locationCandidate = false;
+  $('location-status').textContent=data.locations.length?'请选择下方候选地址，再点击保存；不会自动查询活动。':'没有找到地址，请补充城市或附近小区、道路后重新搜索。';
   for(const location of data.locations){const b=document.createElement('button');b.type='button';b.className='address-option';b.textContent=location.label+' · '+(location.address??'');b.onclick=()=>previewLocation(location);$('address-results').append(b);}
- }catch(e){$('location-status').textContent=e.message;}finally{button.disabled=false;}
+ }catch(e){$('location-status').textContent=e.message+'；请稍后重新搜索，或选择已有候选地址后保存。';}
+ finally{finishLocationOperation();}
 };
 $('locate-once').onclick=()=>{
- const status=$('location-status'),button=$('locate-once'),expectedLocationKey=state?.locationKey??null;
- if(!globalThis.mobileApp && !navigator.geolocation){status.textContent='浏览器不支持定位，请搜索地址选点。';return;}
- button.disabled=true;status.textContent=globalThis.mobileApp?'等待手机定位授权，仅获取一次；不会自动查询活动。':'等待浏览器定位授权，仅获取一次；不会自动查询活动。';
+ if (!beginLocationOperation('locate')) return;
+ const status=$('location-status'),expectedLocationKey=state?.locationKey??null;
+ if(!globalThis.mobileApp && !navigator.geolocation){status.textContent='浏览器不支持定位，请搜索地址选点。';finishLocationOperation();return;}
+ status.textContent=globalThis.mobileApp?'等待手机定位授权，仅获取一次；不会自动查询活动。':'等待浏览器定位授权，仅获取一次；不会自动查询活动。';
  const getPosition = globalThis.mobileApp
   ? (success, failure) => globalThis.mobileApp.locate().then(coords=>success({coords}),failure)
   : (success, failure, options) => navigator.geolocation.getCurrentPosition(success, failure, options);
@@ -194,11 +235,12 @@ $('locate-once').onclick=()=>{
   try{
    if(globalThis.mobileApp){
     const coords=position.coords;await api('/api/location-current',{lat:coords.lat,lng:coords.lng,address:coords.address,city:coords.city,expectedLocationKey});
+    locationCandidate = false; $('address-results').replaceChildren();
     await refresh();$('location-form').hidden=true;message('已获取并保存当前位置。');
-   }else{const result=await api('/api/location-reverse',{lat:position.coords.latitude,lng:position.coords.longitude});previewLocation(result.location);}
+   }else{const result=await api('/api/location-reverse',{lat:position.coords.latitude,lng:position.coords.longitude});locationOperation='';previewLocation(result.location);}
   }catch(e){if(globalThis.mobileApp){const coords=position.coords;$('address-keyword').value=(coords.address||coords.city||'').slice(0,80);status.textContent=e.message+(e.message.includes('原位置未更改')?'':'；可搜索附近小区或道路，原位置未更改。');}else status.textContent=e.message+' 可搜索地址纠正。';}
-  finally{button.disabled=false;}
- },error=>{status.textContent=(globalThis.mobileApp&&error?.message?error.message:'定位失败或未授权，请搜索地址选点。')+' 原位置未更改。';button.disabled=false;},{enableHighAccuracy:true,timeout:15000,maximumAge:0});
+  finally{finishLocationOperation();}
+ },error=>{status.textContent=(globalThis.mobileApp&&error?.message?error.message:'定位失败或未授权，请搜索地址选点。')+' 原位置未更改。';finishLocationOperation();},{enableHighAccuracy:true,timeout:15000,maximumAge:0});
 };
 
 $('retry-connect').onclick=()=>refresh();
