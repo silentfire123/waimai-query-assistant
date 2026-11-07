@@ -21,7 +21,7 @@ public class MainActivity extends Activity {
  private static final String ORIGIN="https://appassets.androidplatform.net";
  private WebView web;private PhoneStore store;private final Handler main=new Handler(Looper.getMainLooper());
  private final ExecutorService worker=Executors.newSingleThreadExecutor();private WaimaiClient wm;private String wmSession;
- private String locationRequest,exportRequest,exportText;private LocationListener locationListener;private final Map<String,Boolean> inFlight=new ConcurrentHashMap<>();
+ private boolean resolvingLocation;private String locationRequest,exportRequest,exportText;private LocationListener locationListener;private final Map<String,Boolean> inFlight=new ConcurrentHashMap<>();
  @Override public void onCreate(Bundle state){super.onCreate(state);store=new PhoneStore(this);
   if(Build.VERSION.SDK_INT>=33)getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,this::handleBack);
   if(WebView.getCurrentWebViewPackage()==null){showFatal("未检测到 Android System WebView，请先在系统中安装或启用它。");return;}
@@ -77,28 +77,77 @@ public class MainActivity extends Activity {
   final JSONObject saved;try{saved=store.secrets();}catch(Exception error){new AlertDialog.Builder(this).setTitle("凭证无法解密").setMessage("手机密钥不可用。可清除应用数据后重新配置；这会删除已保存位置、名单和凭证。").setPositiveButton("知道了",(d,w)->reply(id,null,"凭证未修改")).setOnCancelListener(d->reply(id,null,"已取消")).show();return;}
   ScrollView scroll=new ScrollView(this);LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);int pad=(int)(20*getResources().getDisplayMetrics().density);layout.setPadding(pad,pad,pad,pad);scroll.addView(layout);
   TextView note=new TextView(this);note.setText("可留空使用匿名查询。仅填写本人合法持有的凭证，不会读取微信或电脑配置。凭证使用手机密钥加密保存，不随诊断导出。空白保留旧值，勾选下方可删除全部。\n查询请保持应用在前台，退出或被系统回收可能中断。首次运行建议更新 Android System WebView。");layout.addView(note);
-  EditText silk=field(layout,"小蚕 Silk ID（成对填写）",saved.optString("XC_SILK_ID",""),false),user=field(layout,"小蚕 User ID",saved.optString("XC_USER_ID",""),false),token=field(layout,"歪麦 Token"+(saved.optString("WM_TOKEN").isEmpty()?"（未设置）":"（已保存，空白保留）"),"",true),amap=field(layout,"高德 Web 服务 Key"+(saved.optString("AMAP_KEY").isEmpty()?"（可选，定位反查使用）":"（已保存，空白保留）"),"",true);
+  EditText silk=field(layout,"小蚕 Silk ID（成对填写）",saved.optString("XC_SILK_ID",""),false),user=field(layout,"小蚕 User ID",saved.optString("XC_USER_ID",""),false),token=field(layout,"歪麦 Token"+(saved.optString("WM_TOKEN").isEmpty()?"（未设置）":"（已保存，空白保留）"),"",true);
   CheckBox clear=new CheckBox(this);clear.setText("删除全部已保存凭证，恢复匿名模式");layout.addView(clear);
   AlertDialog dialog=new AlertDialog.Builder(this).setTitle("手机凭证设置").setView(scroll).setPositiveButton("保存",null).setNegativeButton("取消",(d,w)->reply(id,null,"已取消，凭证未修改")).setOnCancelListener(d->reply(id,null,"已取消，凭证未修改")).create();dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{try{
    JSONObject next=new JSONObject();if(!clear.isChecked()){
     String a=silk.getText().toString().trim(),b=user.getText().toString().trim();if(a.isEmpty())a="0";if(b.isEmpty())b="0";
     if(!a.matches("0|[1-9][0-9]{0,11}")||!b.matches("0|[1-9][0-9]{0,11}")||a.equals("0")!=b.equals("0"))throw new IllegalArgumentException("小蚕 ID 须为成对的最多 12 位数字；留空即匿名");
-    String t=token.getText().toString().trim(),k=amap.getText().toString().trim();if(t.isEmpty())t=saved.optString("WM_TOKEN");if(k.isEmpty())k=saved.optString("AMAP_KEY");
-    if((!t.isEmpty()&&!t.matches("[!-~]{1,4096}"))||(!k.isEmpty()&&!k.matches("[A-Za-z0-9_-]{8,128}")))throw new IllegalArgumentException("凭证格式无效，请只填写凭证值，不要粘贴完整请求");
-    next.put("XC_SILK_ID",a).put("XC_USER_ID",b).put("WM_TOKEN",t).put("AMAP_KEY",k);
-   }store.saveSecrets(next);wm=null;wmSession=null;token.setText("");amap.setText("");dialog.dismiss();Toast.makeText(this,"已保存到手机，下次查询生效",Toast.LENGTH_LONG).show();reply(id,true,null);
+    String t=token.getText().toString().trim();if(t.isEmpty())t=saved.optString("WM_TOKEN");
+    if(!t.isEmpty()&&!t.matches("[!-~]{1,4096}"))throw new IllegalArgumentException("凭证格式无效，请只填写凭证值，不要粘贴完整请求");
+    next.put("XC_SILK_ID",a).put("XC_USER_ID",b).put("WM_TOKEN",t);
+   }store.saveSecrets(next);wm=null;wmSession=null;token.setText("");dialog.dismiss();Toast.makeText(this,"已保存到手机，下次查询生效",Toast.LENGTH_LONG).show();reply(id,true,null);
   }catch(IllegalArgumentException error){Toast.makeText(this,error.getMessage(),Toast.LENGTH_LONG).show();}catch(Exception error){Toast.makeText(this,"保存失败，请检查手机剩余空间",Toast.LENGTH_LONG).show();}}));dialog.show();
  }
  private void locate(String id){if(locationRequest!=null){reply(id,null,"定位已经在进行中");return;}locationRequest=id;
   if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)!=PackageManager.PERMISSION_GRANTED&&checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED){requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION,Manifest.permission.ACCESS_COARSE_LOCATION},11);return;}startLocation();}
  @Override public void onRequestPermissionsResult(int request,String[] permissions,int[] results){super.onRequestPermissionsResult(request,permissions,results);if(request==11){if(checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION)==PackageManager.PERMISSION_GRANTED||checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)==PackageManager.PERMISSION_GRANTED)startLocation();else finishLocation(null,"定位未授权，请搜索地址选点");}}
- private void startLocation(){final String requestedId=locationRequest;LocationManager manager=(LocationManager)getSystemService(LOCATION_SERVICE);try{
-  locationListener=new LocationListener(){@Override public void onLocationChanged(Location location){try{finishLocation(new JSONObject().put("lat",location.getLatitude()).put("lng",location.getLongitude()).put("latitude",location.getLatitude()).put("longitude",location.getLongitude()),null);}catch(Exception e){finishLocation(null,"定位数据无效");}}@Override public void onProviderDisabled(String p){}@Override public void onProviderEnabled(String p){}@Override public void onStatusChanged(String p,int s,Bundle b){}};
-  boolean requested=false;for(String provider:new String[]{LocationManager.NETWORK_PROVIDER,LocationManager.GPS_PROVIDER}){if(provider.equals(LocationManager.GPS_PROVIDER)&&checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED)continue;if(manager.isProviderEnabled(provider)){manager.requestLocationUpdates(provider,0,0,locationListener,Looper.getMainLooper());requested=true;}}
-  if(!requested){finishLocation(null,"请开启系统位置服务，或搜索地址选点");return;}
-  main.postDelayed(()->{if(Objects.equals(locationRequest,requestedId))finishLocation(null,"定位超时，请搜索地址选点");},15000);
- }catch(Exception e){finishLocation(null,"定位不可用，请搜索地址选点");}}
- private void finishLocation(JSONObject value,String error){String id=locationRequest;locationRequest=null;if(locationListener!=null){try{((LocationManager)getSystemService(LOCATION_SERVICE)).removeUpdates(locationListener);}catch(Exception ignored){}locationListener=null;}if(id!=null)reply(id,value,error);}
+ private void startLocation(){
+  final String requestedId=locationRequest;LocationManager manager=(LocationManager)getSystemService(LOCATION_SERVICE);
+  try{
+   resolvingLocation=false;
+   locationListener=new LocationListener(){
+    @Override public void onLocationChanged(Location location){
+     if(!Objects.equals(locationRequest,requestedId)||resolvingLocation)return;
+     // Ignore stale/coarse fixes: a nearby address must not replace the actual current point.
+     if(!location.hasAccuracy()||location.getAccuracy()>100||SystemClock.elapsedRealtimeNanos()-location.getElapsedRealtimeNanos()>TimeUnit.SECONDS.toNanos(30))return;
+     resolvingLocation=true;stopLocationUpdates();resolveAddress(requestedId,location);
+    }
+    @Override public void onProviderDisabled(String p){}
+    @Override public void onProviderEnabled(String p){}
+    @Override public void onStatusChanged(String p,int status,Bundle b){}
+   };
+   boolean requested=false;
+   for(String provider:new String[]{LocationManager.NETWORK_PROVIDER,LocationManager.GPS_PROVIDER}){
+    if(provider.equals(LocationManager.GPS_PROVIDER)&&checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION)!=PackageManager.PERMISSION_GRANTED)continue;
+    if(manager.isProviderEnabled(provider)){manager.requestLocationUpdates(provider,0,0,locationListener,Looper.getMainLooper());requested=true;}
+   }
+   if(!requested){finishLocation(null,"请开启系统位置服务，或搜索地址选点");return;}
+   main.postDelayed(()->{if(Objects.equals(locationRequest,requestedId))finishLocation(null,"定位或地址识别超时，请检查精确定位权限，或搜索附近地址");},30000);
+  }catch(Exception e){finishLocation(null,"定位不可用，请搜索地址选点");}
+ }
+ private void resolveAddress(String requestId,Location location){
+  if(!Geocoder.isPresent()){completeAddress(requestId,null,"手机系统没有可用的地址识别服务，请搜索附近地址");return;}
+  Geocoder geocoder=new Geocoder(this,Locale.SIMPLIFIED_CHINESE);
+  if(Build.VERSION.SDK_INT>=33){
+   try{geocoder.getFromLocation(location.getLatitude(),location.getLongitude(),1,new Geocoder.GeocodeListener(){
+    @Override public void onGeocode(List<Address> results){addressResult(requestId,location,results);}
+    @Override public void onError(String error){completeAddress(requestId,null,"当前位置地址识别失败，请搜索附近地址");}
+   });}catch(Exception e){completeAddress(requestId,null,"当前位置地址识别失败，请搜索附近地址");}
+  }else{
+   worker.execute(()->{try{addressResult(requestId,location,geocoder.getFromLocation(location.getLatitude(),location.getLongitude(),1));}catch(Exception e){completeAddress(requestId,null,"当前位置地址识别失败，请搜索附近地址");}});
+  }
+ }
+ private void addressResult(String requestId,Location location,List<Address> results){
+  try{
+   if(results==null||results.isEmpty())throw new IOException();
+   Address address=results.get(0);String line=address.getMaxAddressLineIndex()>=0?address.getAddressLine(0):null;
+   String city=address.getLocality();if(city==null||city.trim().isEmpty())city=address.getSubAdminArea();
+   if(city==null||city.trim().isEmpty())city=address.getAdminArea();
+   String text=line==null?"":line.trim();
+   if(text.isEmpty()){
+    LinkedHashSet<String> parts=new LinkedHashSet<>();
+    for(String part:new String[]{address.getAdminArea(),city,address.getSubLocality(),address.getThoroughfare(),address.getFeatureName()})if(part!=null&&!part.trim().isEmpty())parts.add(part.trim());
+    text=String.join(" ",parts);
+   }else if(city!=null&&!text.contains(city))text=city+" "+text;
+   if(text.length()<2)throw new IOException();
+   if(text.length()>80)text=text.substring(0,80);
+   completeAddress(requestId,new JSONObject().put("lat",location.getLatitude()).put("lng",location.getLongitude()).put("address",text).put("city",city==null?"":city),null);
+  }catch(Exception e){completeAddress(requestId,null,"手机系统未能识别当前位置地址，请搜索附近地址");}
+ }
+ private void completeAddress(String requestId,JSONObject value,String error){main.post(()->{if(Objects.equals(locationRequest,requestId))finishLocation(value,error);});}
+ private void stopLocationUpdates(){if(locationListener!=null){try{((LocationManager)getSystemService(LOCATION_SERVICE)).removeUpdates(locationListener);}catch(Exception ignored){}locationListener=null;}}
+ private void finishLocation(JSONObject value,String error){String id=locationRequest;locationRequest=null;resolvingLocation=false;stopLocationUpdates();if(id!=null)reply(id,value,error);}
  private void export(String id,JSONObject data){if(exportRequest!=null){reply(id,null,"文件保存已在进行中");return;}exportRequest=id;exportText=data.toString();Intent intent=new Intent(Intent.ACTION_CREATE_DOCUMENT);intent.addCategory(Intent.CATEGORY_OPENABLE);intent.setType("application/json");intent.putExtra(Intent.EXTRA_TITLE,"waimai-diagnostic.json");try{startActivityForResult(intent,12);}catch(Exception e){exportRequest=null;exportText=null;reply(id,null,"系统没有可用的文件保存程序");}}
  @Override protected void onActivityResult(int request,int result,Intent intent){super.onActivityResult(request,result,intent);if(request==12&&exportRequest!=null){String id=exportRequest,text=exportText;exportRequest=null;exportText=null;if(result!=RESULT_OK||intent==null||intent.getData()==null){reply(id,null,"已取消保存");return;}Uri uri=intent.getData();worker.execute(()->{try(OutputStream out=getContentResolver().openOutputStream(uri,"wt")){if(out==null)throw new IOException();out.write(text.getBytes(StandardCharsets.UTF_8));reply(id,true,null);}catch(Exception e){reply(id,null,"文件保存失败，请重新选择位置");}});}}
  @Override public void onBackPressed(){handleBack();}

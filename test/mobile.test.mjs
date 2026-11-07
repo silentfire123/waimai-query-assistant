@@ -11,6 +11,54 @@ async function setLocation(app){return app.request('/api/location',loc);}
 async function query(app){const state=await app.request('/api/state');return app.request('/api/query',{pages:10,locationKey:state.locationKey});}
 async function done(app){for(let i=0;i<100;i++){if(!(await app.request('/api/state')).busy)return;await new Promise(r=>setTimeout(r,2));}throw Error('query did not finish');}
 
+test('手机：无 Key 定位保存真实 GCJ 坐标而非候选坐标，不自动查询',async()=>{
+ let keyword;const f=setup({search:async value=>{keyword=value;return [{...loc,label:'较远候选',lat:39.913,lng:116.404,adcode:110101,city:'北京市'},{...loc,label:'近候选',lat:39.9103,lng:116.4038,adcode:110101,city:'北京市'}];}});
+ const result=await f.app.request('/api/location-current',{lat:39.908823,lng:116.39747,address:'北京市测试路'});
+ assert.equal(keyword,'北京市测试路');assert.equal(result.location.adcode,110101);assert.equal(result.location.label,'当前位置 · 北京市测试路');
+ assert.ok(Math.abs(result.location.lat-39.910226)<0.000002);assert.ok(Math.abs(result.location.lng-116.403714)<0.000002);assert.notEqual(result.location.lat,39.9103);
+ assert.deepEqual(f.read().location,result.location);assert.deepEqual((await createMobileApp(f.deps).request('/api/state')).location,result.location);assert.equal(f.calls(),0);
+});
+test('手机：没有近距离匹配时保留旧位置',async()=>{const f=setup({search:async()=>[{...loc,label:'远处位置',lat:35,lng:108}]});await setLocation(f.app);await assert.rejects(f.app.request('/api/location-current',{lat:34,lng:108,address:'虚构地址'}),/匹配/);assert.deepEqual((await f.app.request('/api/state')).location,loc);});
+
+const gps={lat:39.908823,lng:116.39747,address:'北京市测试路'};
+const gpsCandidate={label:'测试候选',lat:39.9103,lng:116.4038,adcode:110101,city:'北京市'};
+test('手机：当前位置输入错误、搜索异常及区划冲突均不改变旧位置',async()=>{
+ for(const candidates of [[],[{...gpsCandidate,adcode:0}],[{...gpsCandidate,city:''}],[gpsCandidate,{...gpsCandidate,adcode:110102}],[{...gpsCandidate,lat:40.1}]]){
+  const f=setup({search:async()=>candidates});await setLocation(f.app);await assert.rejects(f.app.request('/api/location-current',gps));assert.deepEqual(f.read().location,loc);
+ }
+ for(const value of [{...gps,lat:91},{...gps,lng:NaN},{...gps,address:''},{...gps,address:'x'.repeat(81)}]){
+  let calls=0;const f=setup({search:async()=>{calls++;return [gpsCandidate];}});await setLocation(f.app);await assert.rejects(f.app.request('/api/location-current',value));assert.equal(calls,0);assert.deepEqual(f.read().location,loc);
+ }
+ const f=setup({search:async()=>{throw Error('网络不可用');}});await setLocation(f.app);await assert.rejects(f.app.request('/api/location-current',gps),/网络/);assert.deepEqual(f.read().location,loc);
+});
+test('手机：当前位置落盘失败原子回滚',async()=>{
+ let saved={},fail=false;const f=setup({storage:{read:()=>structuredClone(saved),write:value=>{if(fail)throw Error('full');saved=structuredClone(value);}},search:async()=>[gpsCandidate]});await setLocation(f.app);fail=true;
+ await assert.rejects(f.app.request('/api/location-current',gps),/保存失败/);assert.deepEqual((await f.app.request('/api/state')).location,loc);assert.deepEqual(saved.location,loc);
+});
+test('手机：定位匹配期间不允许启动查询',async()=>{
+ let release;const f=setup({search:()=>new Promise(resolve=>{release=()=>resolve([gpsCandidate]);})});await setLocation(f.app);
+ const pending=f.app.request('/api/location-current',gps);await assert.rejects(query(f.app),/定位/);release();await pending;assert.equal(f.calls(),0);
+});
+test('手机：手动保存新位置后，迟到的定位匹配不能覆盖',async()=>{
+ let release;const f=setup({search:()=>new Promise(resolve=>{release=()=>resolve([gpsCandidate]);})});await setLocation(f.app);
+ const pending=f.app.request('/api/location-current',gps),chosen={...loc,label:'后来手选的位置'};await f.app.request('/api/location',chosen);release();await assert.rejects(pending,/变化/);assert.deepEqual(f.read().location,chosen);
+});
+
+test('手机：原生定位等待期间用户已换位置，拒绝保存迟到坐标',async()=>{
+ let searched=0;const f=setup({search:async()=>{searched++;return [gpsCandidate];}});await setLocation(f.app);const oldKey=(await f.app.request('/api/state')).locationKey;
+ const chosen={...loc,lng:109};await f.app.request('/api/location',chosen);await assert.rejects(f.app.request('/api/location-current',{...gps,expectedLocationKey:oldKey}),/变化/);assert.equal(searched,0);assert.deepEqual(f.read().location,chosen);
+});
+test('手机：查询中拒绝定位匹配，不调用地址搜索',async()=>{
+ let release,searched=0;const f=setup({search:async()=>{searched++;return [gpsCandidate];},collect:()=>new Promise(resolve=>{release=()=>resolve(data);})});await setLocation(f.app);await query(f.app);
+ await assert.rejects(f.app.request('/api/location-current',gps),/正在查询/);assert.equal(searched,0);assert.deepEqual(f.read().location,loc);release();await done(f.app);
+});
+
+test('手机：自动保存拒绝城市与区划代码矛盾的候选',async()=>{
+ for(const candidates of [[{...gpsCandidate,city:'上海市'}],[{...gpsCandidate,city:'上海市'},gpsCandidate]]){
+  const f=setup({search:async()=>candidates});await setLocation(f.app);await assert.rejects(f.app.request('/api/location-current',gps),/城市/);assert.deepEqual(f.read().location,loc);
+ }
+});
+
 test('手机：初始化/演示不调用真实采集；位置、真实结果和诊断分离',async()=>{const f=setup();assert.equal((await f.app.request('/api/state')).report,null);const demo=await f.app.request('/api/demo');assert.equal(demo.source,'demo');assert.equal(f.calls(),0);assert.equal((await f.app.request('/api/state')).report,null);await assert.rejects(f.app.request('/api/diagnostics'),/尚无/);});
 test('手机：保存、查询、同 ID 交集、重启持久化与位置不匹配',async()=>{const f=setup();await setLocation(f.app);await query(f.app);await done(f.app);assert.equal(f.calls(),1);const state=await f.app.request('/api/state');assert.equal(state.report.counts.confirmed,1);assert.equal(state.resultMatchesLocation,true);const second=createMobileApp(f.deps);assert.deepEqual((await second.request('/api/state')).report,state.report);await second.request('/api/location',{...loc,lng:109});assert.equal((await second.request('/api/state')).resultMatchesLocation,false);});
 test('手机：锁单、查询中禁止改位置、完成后冷却、参数验证',async()=>{let release;const f=setup({collect:()=>new Promise(resolve=>{release=()=>resolve(data);}),cooldownMs:10000});await setLocation(f.app);await query(f.app);await assert.rejects(query(f.app),/进行中/);await assert.rejects(setLocation(f.app),/正在查询/);release();await done(f.app);await assert.rejects(query(f.app),/稍等/);});

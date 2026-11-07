@@ -184,17 +184,21 @@ $('search-address').onclick=async()=>{
  }catch(e){$('location-status').textContent=e.message;}finally{button.disabled=false;}
 };
 $('locate-once').onclick=()=>{
- const status=$('location-status'),button=$('locate-once');
+ const status=$('location-status'),button=$('locate-once'),expectedLocationKey=state?.locationKey??null;
  if(!globalThis.mobileApp && !navigator.geolocation){status.textContent='浏览器不支持定位，请搜索地址选点。';return;}
  button.disabled=true;status.textContent=globalThis.mobileApp?'等待手机定位授权，仅获取一次；不会自动查询活动。':'等待浏览器定位授权，仅获取一次；不会自动查询活动。';
  const getPosition = globalThis.mobileApp
   ? (success, failure) => globalThis.mobileApp.locate().then(coords=>success({coords}),failure)
   : (success, failure, options) => navigator.geolocation.getCurrentPosition(success, failure, options);
  getPosition(async position=>{
-  try{const result=await api('/api/location-reverse',{lat:position.coords.latitude,lng:position.coords.longitude});previewLocation(result.location);}
-  catch(e){status.textContent=e.message+' 可搜索地址纠正。';}
+  try{
+   if(globalThis.mobileApp){
+    const coords=position.coords;await api('/api/location-current',{lat:coords.lat,lng:coords.lng,address:coords.address,city:coords.city,expectedLocationKey});
+    await refresh();$('location-form').hidden=true;message('已获取并保存当前位置。');
+   }else{const result=await api('/api/location-reverse',{lat:position.coords.latitude,lng:position.coords.longitude});previewLocation(result.location);}
+  }catch(e){if(globalThis.mobileApp){const coords=position.coords;$('address-keyword').value=(coords.address||coords.city||'').slice(0,80);status.textContent=e.message+(e.message.includes('原位置未更改')?'':'；可搜索附近小区或道路，原位置未更改。');}else status.textContent=e.message+' 可搜索地址纠正。';}
   finally{button.disabled=false;}
- },()=>{status.textContent='定位失败或未授权，请搜索地址选点。';button.disabled=false;},{enableHighAccuracy:true,timeout:15000,maximumAge:0});
+ },error=>{status.textContent=(globalThis.mobileApp&&error?.message?error.message:'定位失败或未授权，请搜索地址选点。')+' 原位置未更改。';button.disabled=false;},{enableHighAccuracy:true,timeout:15000,maximumAge:0});
 };
 
 $('retry-connect').onclick=()=>refresh();

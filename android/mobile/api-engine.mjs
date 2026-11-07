@@ -1,6 +1,7 @@
 import {collectAll} from '../../collector.mjs';
 import {buildReport,demoReport,searchLocations} from '../../core.mjs';
-import {reverseLocation} from '../../location.mjs';
+import {reverseLocation,toGcj02} from '../../location.mjs';
+import {readResourceJson} from '../../platform.mjs';
 import {diagnosticSummary} from '../../diagnostic-core.mjs';
 
 // Same caller-facing routes as the desktop UI, but no HTTP server, port, or cloud.
@@ -8,7 +9,7 @@ export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collec
  let saved=storage.read()??{};
  if(saved.version!=null&&saved.version!==1)throw Error('手机缓存版本不兼容，请先备份或清除应用数据');
  let location=saved.location??null,snapshot=saved.snapshot??{report:null,attempt:null},diagnostic=saved.diagnostic??null;
- let busy=false,progress='',nextAllowedAt=Number(saved.nextAllowedAt)||0,locationNextAt=0;
+ let locating=false,busy=false,progress='',nextAllowedAt=Number(saved.nextAllowedAt)||0,locationNextAt=0;
  const keyOf=loc=>loc?JSON.stringify([loc.lat,loc.lng,loc.adcode]):null;
  const persist=()=>storage.write({version:1,location,snapshot,diagnostic,nextAllowedAt});
  if(snapshot.attempt?.status==='running'){snapshot={...snapshot,attempt:{...snapshot.attempt,status:'blocked',errors:[{source:'query',message:'上次查询被系统中断，请在前台手动重试；已保存的结果保留'}]}};nextAllowedAt=clock()+cooldownMs;persist();}
@@ -32,7 +33,7 @@ export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collec
    try{persist();}catch{snapshot.attempt.persistenceError='结果未能保存到手机，退出应用后可能丢失，请检查剩余空间';}
   }
  }
- return {isBusy:()=>busy,async request(route,value){
+ return {isBusy:()=>busy||locating,async request(route,value){
   if(route==='/api/state')return state();
   if(route==='/api/demo')return demoReport();
   if(route==='/api/diagnostics'){if(!diagnostic)throw Error('尚无查询诊断，请先手动完成一次查询');return structuredClone(diagnostic);}
@@ -40,13 +41,33 @@ export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collec
   if(route==='/api/location'){
    if(busy)throw Error('正在查询，请稍后再修改位置');const next=validate(value),old=location;location=next;try{persist();}catch(error){location=old;throw error;}return state();
   }
-  if(route==='/api/location-search'||route==='/api/location-reverse'){
+  if(route==='/api/location-search'||route==='/api/location-reverse'||route==='/api/location-current'){
    if(clock()<locationNextAt)throw Error('位置操作较频繁，请稍后重试');locationNextAt=clock()+1500;
    if(route==='/api/location-search')return {locations:await search(value?.keyword)};
+   if(route==='/api/location-current'){
+    if(busy||locating)throw Error('正在查询或定位，请稍后重试');
+    const point=toGcj02(value?.lat,value?.lng),previous=location;
+    if(value.expectedLocationKey!==undefined&&value.expectedLocationKey!==keyOf(location))throw Error('查询位置已变化，本次定位未保存，请重试');
+    if(typeof value.address!=='string'||value.address.trim().length<2||value.address.trim().length>80)throw Error('手机未能识别当前位置地址，请搜索附近地址');
+    locating=true;
+    try{
+     const candidates=await search(value.address.trim());
+     const distance=candidate=>{const rad=Math.PI/180,lat1=point.lat*rad,lat2=candidate.lat*rad,dLat=(candidate.lat-point.lat)*rad,dLng=(candidate.lng-point.lng)*rad;const a=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLng/2)**2;return 6371000*2*Math.atan2(Math.sqrt(Math.min(1,a)),Math.sqrt(Math.max(0,1-a)));};
+     const nearby=candidates.filter(candidate=>candidate&&Number.isFinite(candidate.lat)&&Math.abs(candidate.lat)<=90&&Number.isFinite(candidate.lng)&&Math.abs(candidate.lng)<=180&&/^[1-9]\d{5}$/.test(String(candidate.adcode))&&typeof candidate.city==='string'&&candidate.city.trim()).map(candidate=>({candidate,meters:distance(candidate)})).filter(item=>item.meters<=500).sort((a,b)=>a.meters-b.meters);
+     if(!nearby.length||nearby.some(item=>Number(item.candidate.adcode)!==Number(nearby[0].candidate.adcode)))throw Error('附近没有匹配到明确的行政区划，请搜索附近小区或道路；原位置未更改');
+     const cities=await readResourceJson('cities.json'),city=cities[String(nearby[0].candidate.adcode)];
+     if(!city||nearby.some(item=>item.candidate.city.trim()!==city))throw Error('当前位置城市与行政区划不一致，请搜索附近地址；原位置未更改');
+     if(busy||location!==previous)throw Error('位置或查询状态已变化，本次定位未保存，请重试');
+     const next=validate({...nearby[0].candidate,...point,city,label:('当前位置 · '+value.address).slice(0,60)});location=next;
+     try{persist();}catch(error){location=previous;throw Error('当前位置保存失败，原位置未更改');}
+     return {location:structuredClone(location),state:state()};
+    }finally{locating=false;}
+   }
    if(!value||!Number.isFinite(value.lat)||!Number.isFinite(value.lng))throw Error('无效定位坐标');
    try{return {location:await reverse(value)};}catch(error){throw Error(error.message.replace('服务端配置 AMAP_KEY','手机凭证设置中配置高德 Key'));}
   }
   if(route==='/api/query'){
+   if(locating)throw Error('正在定位，请等待定位保存后再查询');
    if(busy)throw Error('查询已在进行中，请等待');if(!location)throw Error('请先设置查询位置');
    if(value?.locationKey!==keyOf(location))throw Error('查询位置已变化，请确认位置后重试');
    const pages=value?.pages??10;if(![10,20].includes(pages))throw Error('每类页数只可选 10 或 20');
