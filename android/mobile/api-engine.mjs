@@ -1,11 +1,11 @@
 import {collectAll} from '../../collector.mjs';
 import {buildReport,demoReport,searchLocations} from '../../core.mjs';
-import {reverseLocation,toGcj02} from '../../location.mjs';
+import {toGcj02} from '../../location.mjs';
 import {readResourceJson} from '../../platform.mjs';
 import {diagnosticSummary} from '../../diagnostic-core.mjs';
 
 // Same caller-facing routes as the desktop UI, but no HTTP server, port, or cloud.
-export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collect=collectAll,search=searchLocations,reverse=reverseLocation,clock=Date.now,cooldownMs=10000}) {
+export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collect=collectAll,search=searchLocations,clock=Date.now,cooldownMs=10000}) {
  let saved=storage.read()??{};
  if(saved.version!=null&&saved.version!==1)throw Error('手机缓存版本不兼容，请先备份或清除应用数据');
  let location=saved.location??null,snapshot=saved.snapshot??{report:null,attempt:null},diagnostic=saved.diagnostic??null;
@@ -28,7 +28,7 @@ export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collec
   try{data=await collect(pages,{location:chosen,log:message=>{progress=message;}});const report={...buildReport(data),context};snapshot.attempt={status:report.status,generatedAt:report.generatedAt,context,errors:report.errors};if(report.status!=='blocked')snapshot.report=report;}
   catch{snapshot.attempt={status:'blocked',generatedAt:new Date(clock()).toISOString(),context,errors:[{source:'query',message:'本轮查询失败，请检查网络、位置或手机凭证设置；上次名单保留'}]};}
   finally{
-   diagnostic=diagnosticSummary({...data,config:{hasWmToken:!!config().hasWmToken,hasAmapKey:!!config().hasAmapKey,publicMode:false},queryId:context.queryId,codeVersion,pages,durationMs:clock()-started,status:snapshot.attempt.status,errors:snapshot.attempt.errors});
+   diagnostic=diagnosticSummary({...data,config:{hasWmToken:!!config().hasWmToken,hasAmapKey:false,publicMode:false},queryId:context.queryId,codeVersion,pages,durationMs:clock()-started,status:snapshot.attempt.status,errors:snapshot.attempt.errors});
    busy=false;progress='';nextAllowedAt=clock()+cooldownMs;
    try{persist();}catch{snapshot.attempt.persistenceError='结果未能保存到手机，退出应用后可能丢失，请检查剩余空间';}
   }
@@ -41,7 +41,7 @@ export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collec
   if(route==='/api/location'){
    if(busy)throw Error('正在查询，请稍后再修改位置');const next=validate(value),old=location;location=next;try{persist();}catch(error){location=old;throw error;}return state();
   }
-  if(route==='/api/location-search'||route==='/api/location-reverse'||route==='/api/location-current'){
+  if(route==='/api/location-search'||route==='/api/location-current'){
    if(clock()<locationNextAt)throw Error('位置操作较频繁，请稍后重试');locationNextAt=clock()+1500;
    if(route==='/api/location-search')return {locations:await search(value?.keyword)};
    if(route==='/api/location-current'){
@@ -63,8 +63,6 @@ export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collec
      return {location:structuredClone(location),state:state()};
     }finally{locating=false;}
    }
-   if(!value||!Number.isFinite(value.lat)||!Number.isFinite(value.lng))throw Error('无效定位坐标');
-   try{return {location:await reverse(value)};}catch(error){throw Error(error.message.replace('服务端配置 AMAP_KEY','手机凭证设置中配置高德 Key'));}
   }
   if(route==='/api/query'){
    if(locating)throw Error('正在定位，请等待定位保存后再查询');

@@ -21,7 +21,7 @@
 在 PowerShell 中运行（此命令不包含凭证）：
 
 ```powershell
-& 'D:\zcode-worker\waimai-assistant\scripts\waimai-login.ps1'
+.\scripts\waimai-login.ps1
 ```
 
 脚本会提示隐藏输入；只粘贴token值，不是完整请求，不把token写在命令参数里。当前实机执行策略是RemoteSigned；若其他机器提示禁止运行脚本，先核对其管理策略，不为此全局放宽执行策略。

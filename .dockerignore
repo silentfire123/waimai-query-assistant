@@ -7,3 +7,10 @@ output
 node_modules
 local-config.json
 *-private.json
+
+# APK/SDK build outputs never belong in the Node image context.
+android/build
+android/.gradle
+android/local.properties
+*.jks
+*.keystore

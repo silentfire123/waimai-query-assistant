@@ -63,7 +63,7 @@ public class MainActivity extends Activity {
      if(!operation.equals("http")&&!operation.equals("wmInit")&&!operation.equals("wmPage")){reply(id,null,"未支持的手机操作");return;}
      worker.execute(()->{try{
       Object value;
-      if(operation.equals("http")){value=Upstream.browserRequest(input,store);}
+      if(operation.equals("http")){value=Upstream.browserRequest(input);}
       else if(operation.equals("wmInit")){wm=null;wmSession=null;WaimaiClient next=new WaimaiClient(input.getJSONObject("location"),store.secrets().optString("WM_TOKEN"));wm=next;wmSession=UUID.randomUUID().toString();value=wmSession;}
       else{if(wm==null||!Objects.equals(wmSession,input.getString("session")))throw new SecurityException();value=wm.page(input.opt("cursor"));}
       reply(id,value,null);

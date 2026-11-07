@@ -14,8 +14,9 @@ public class NativeSelfTest {
   check(ProtocolCrypto.aes(p.getProperty("cipher"),key,true).equals(text),"AES Java decrypt matches Node");
   check(ProtocolCrypto.unwrap(p.getProperty("wrapped"),ProtocolCrypto.privateKey(p.getProperty("private"))).equals(key),"RSA Java unwraps Node protocol key");
   Files.write(Paths.get(args[1]),ProtocolCrypto.wrap(key,ProtocolCrypto.publicKey(p.getProperty("public"))).getBytes(StandardCharsets.UTF_8));
-  NetworkPolicy.check("https://gw.xiaocantech.com/rpc","POST","FusionService.GetFeedPromotions");NetworkPolicy.check("https://gw.xiaocantech.com/rpc","POST","FusionService.GetMeiTuanPromotions");NetworkPolicy.check("https://gw.xiaocantech.com/rpc","POST","SilkwormLbsService.Suggestion");NetworkPolicy.check("https://restapi.amap.com/v3/geocode/regeo?key=test","GET","");
+  NetworkPolicy.check("https://gw.xiaocantech.com/rpc","POST","FusionService.GetFeedPromotions");NetworkPolicy.check("https://gw.xiaocantech.com/rpc","POST","FusionService.GetMeiTuanPromotions");NetworkPolicy.check("https://gw.xiaocantech.com/rpc","POST","SilkwormLbsService.Suggestion");
   check(true,"exact read-only upstream paths allowed");
+  boolean mapBlocked=false;try{NetworkPolicy.check("https://restapi.amap.com/v3/geocode/regeo?key=test","GET","");}catch(SecurityException e){mapBlocked=true;}check(mapBlocked,"removed map-key upstream blocked");
   for(String url:new String[]{"http://gw.xiaocantech.com/rpc","https://gw.xiaocantech.com.evil.test/rpc","https://gw.xiaocantech.com@evil.test/rpc","https://gw.xiaocantech.com:444/rpc","https://gw.xiaocantech.com/rpc/../rpc","https://gw.xiaocantech.com/rpc?x=1","file:///data/data/private","https://127.0.0.1/rpc","https://gw.xiaocantech.com/rpc#fragment"}){boolean blocked=false;try{NetworkPolicy.check(url,"POST","FusionService.GetFeedPromotions");}catch(Exception e){blocked=true;}check(blocked,"blocked URL "+url);}
   boolean blocked=false;try{NetworkPolicy.check("https://gw.xiaocantech.com/rpc","POST","CreateOrder");}catch(Exception e){blocked=true;}check(blocked,"order/other RPC methods blocked");
  }

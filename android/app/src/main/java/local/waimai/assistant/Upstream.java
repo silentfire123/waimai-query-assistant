@@ -20,14 +20,9 @@ final class Upstream {
    return new JSONObject().put("status",status).put("headers",h).put("body",new String(data.toByteArray(),StandardCharsets.UTF_8));
   } finally {c.disconnect();}
  }
- static JSONObject browserRequest(JSONObject input,PhoneStore store) throws Exception {
+ static JSONObject browserRequest(JSONObject input) throws Exception {
   String url=input.getString("url"),method=input.optString("method","GET");JSONObject headers=input.optJSONObject("headers");if(headers==null)headers=new JSONObject();
   NetworkPolicy.check(url,method,headers.optString("methodname"));
-  if(new URI(url).getHost().equals("restapi.amap.com")){
-   String key=store.secrets().optString("AMAP_KEY");if(key.isEmpty())throw new IOException("Missing map key");
-   URI u=new URI(url);String query=u.getRawQuery();if(query==null)throw new IOException("Missing location");
-   query=query.replaceAll("(^|&)key=[^&]*","").replaceAll("^&","");url="https://restapi.amap.com/v3/geocode/regeo?key="+URLEncoder.encode(key,"UTF-8")+"&"+query;
-  }
   return request(url,method,headers,input.optString("body",""));
  }
 }

@@ -2,7 +2,7 @@ import {createMobileApp} from './api-engine.mjs';
 import {storage,randomUUID,nativeCall,getConfig} from './platform.mjs';
 import {codeVersion} from './version.mjs';
 try {
- globalThis.mobileApp=createMobileApp({storage,uuid:randomUUID,codeVersion,config:()=>({hasWmToken:!!getConfig('HAS_WM_TOKEN'),hasAmapKey:!!getConfig('AMAP_KEY')})});
+ globalThis.mobileApp=createMobileApp({storage,uuid:randomUUID,codeVersion,config:()=>({hasWmToken:!!getConfig('HAS_WM_TOKEN')})});
  globalThis.mobileApp.locate=()=>nativeCall('locate');
  globalThis.mobileApp.exportDiagnostic=data=>nativeCall('export',{data});
  document.getElementById('import-location').hidden=true;

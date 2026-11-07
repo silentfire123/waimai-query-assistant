@@ -1,5 +1,7 @@
 # 安卓独立版（自用测试版）
 
+当前源码版本：**1.0.2**（versionCode=5）。使用同一测试签名覆盖更新；不要卸载旧版。1.0.1 及之前的版本记录在下方明确标为历史。
+
 目标：手机直接向既有渠道查询；不需要电脑常驻或部署云服务器。**独立运行不是离线查询**，真实活动与地址搜索仍需联网。
 
 ## 安装与首次使用
@@ -49,7 +51,7 @@ npm test
 npm run android:assets
 ```
 
-## 首页加载修复：v0.1.0-test.2（2026-11-06）
+## 历史：首页加载修复 v0.1.0-test.2（2026-11-06）
 
 - 旧版 `test.1` 存在 Windows AAPT2 产物 ZIP 路径问题：条目是 `assets/www\index.html`，安卓读取的却是 `assets/www/index.html`，因此首页资源不存在并返回 403。签名校验通过不代表资源路径可读。
 - 构建现在在签名前将 ZIP 条目规范成正斜杠，并在签名后运行 `scripts/verify-android-apk.ps1`，检查最终 APK 的首页、模块引用、重复/非法路径及私有文件。
@@ -62,7 +64,7 @@ npm run android:assets
 .\scripts\verify-android-apk.ps1 -ApkPath .\android\build\waimai-assistant-standalone-test.apk
 ```
 
-## 2026-11-06 验证状态与边界
+## 早期构建验证记录与边界（2026-11-06）
 
 - 初版 99 项 Node 测试通过；本次额外加入最终 APK ZIP 门禁回归（Windows 运行，其他系统跳过该 Windows 专用套件）。原有采集/匹配/状态机测试保留。
 - JVM 加密交叉测试通过：MD5、AES 与 Node 字节一致、RSA 双向封装/解封装；只使用生成的虚构密钥。
@@ -74,7 +76,7 @@ npm run android:assets
 
 本地证据（忽略目录，不提交）：`data/android-regression-tests.txt`、`data/android-build.txt`、`data/android-native-test/results.txt`、`data/android-qa/`。
 
-## 免 Key 当前位置：1.0.1（2026-11-06）
+## 历史：免 Key 当前位置 1.0.1（2026-11-06）
 
 - 用户确认：点击获取当前位置，成功后自动保存，无需再点保存；不自动查询外卖。手机与电脑各自独立运行。
 - 手机定位改用 Android 系统 Geocoder（API 33+ 异步，旧版在工作线程执行）取得地址，再复用现有小蚕地址搜索补齐城市及六位行政区划。手机设置不再展示地图 Key，位置表单不再要求手填坐标。
@@ -88,3 +90,10 @@ npm run android:assets
 ### 发布版本命名
 
 从本次起 GitHub 标签使用 `1.0.1`、`1.0.2`、`1.0.3` 依次递增，与 APK versionName 保持一致；versionCode 独立单调递增以支持覆盖升级。旧标签保留，不重写。1.0.1 仍为未完成真机验收的自用测试版。
+
+## 1.0.2 仓库与遗留代码整理（2026-11-06）
+
+- 首页、产品范围、交接与 QA 说明统一为当前双端／多渠道实现；旧排查与实施记录归档至 [docs/history](../docs/history/README.md)。
+- 删除手机界面已不调用的 `/api/location-reverse`、高德 Key 摘要／转发和安卓网络白名单；手机仍用系统定位／Geocoder + 地址搜索。电脑版高德反查继续保留。
+- 诊断仍兼容既有字段，手机 `hasAmapKey` 固定为 false；已存状态无需清空或迁移。旧版本已存地图凭证不再读取，用户主动删除全部凭证或清除应用数据才会移除旧数据；本次升级不为此删除用户数据。
+- 新版本需重新构建、校验和覆盖安装后生效，README 更新本身不会更新已安装 APK；测试签名与真机未验收边界不变。
