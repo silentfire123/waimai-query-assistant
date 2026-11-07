@@ -11,14 +11,16 @@ export async function createWaimaiClient(location,{fetchImpl=fetch,token=process
   const city=location?.city;
   if(typeof city!=='string'||!city.trim()) throw Error('歪麦需要城市名称，请通过地址搜索重新选点');
   const headers=()=>{const timestamp=String(Date.now()),nonce=Array.from(crypto.randomBytes(16),v=>v%10).join('');return {application:'overbear_one',appversion:'1.1.175',city:encodeURIComponent(city),nonce,timestamp,sign:aes(timestamp+nonce,'asdf545asdf4545d'),'content-type':'application/json',Referer:'https://servicewechat.com/wx5762f23d920ad9e5/346/page-frame.html',...(token?{token}:{})};};
-  const post=async(url,body,extra={})=>{const res=await fetchImpl(url,{method:'POST',headers:{...headers(),...extra},body,signal:AbortSignal.timeout(12000)});if(!res.ok)throw Error('歪麦 HTTP '+res.status);return res;};
+  const post=async(url,body,extra={})=>{const res=await fetchImpl(url,{method:'POST',headers:{...headers(),...extra},body,signal:AbortSignal.timeout(12000)});if(!res.ok)throw Object.assign(Error('歪麦 HTTP '+res.status),{httpStatus:res.status});return res;};
   const configRes=await post('https://fz-gateway.waimaimingtang.com/api/api/v2/index/newServiceConfig',JSON.stringify({json:aes(JSON.stringify({city}),'jnd674751fh6fkgu')}));
   const config=await configRes.json();if(config.code!==1||typeof config.data!=='string')throw Error('歪麦配置失败');
   const keys=JSON.parse(aes(config.data,'jnd674751fh6fkgu',true));
   const publicKey=crypto.createPublicKey(pem(keys.publicKey,'PUBLIC')), privateKey=crypto.createPrivateKey(pem(keys.privateKey,'PRIVATE'));
+  let pages=0;
   return async scrollPageData=>{
+    if(++pages>(token?20:2))throw Error('歪麦匿名会话最多两页');
     const key=crypto.randomBytes(16).toString('hex');
-    const params={userLongitude:String(location.lng),userLatitude:String(location.lat),city,limit:15,sortWay:'comprehensive',categoryId:'',shopName:'',secKillFlag:1,signUpFlag:2,highRebatesFlag:0,noCommentFlag:0,takeawayPlatform:'',userTypes:[1,2,3],packageType:'',scrollPageData,threeKmFlag:'',tabType:'bwc'};
+    const params={userLongitude:String(location.lng),userLatitude:String(location.lat),city,limit:15,sortWay:'comprehensive',categoryId:'',shopName:'',secKillFlag:1,signUpFlag:2,highRebatesFlag:0,noCommentFlag:0,takeawayPlatform:'meituan',userTypes:[1,2,3],packageType:'',scrollPageData,threeKmFlag:'',tabType:'bwc'};
     const encryptKey=crypto.publicEncrypt({key:publicKey,padding:crypto.constants.RSA_PKCS1_PADDING},Buffer.from(Buffer.from(key).toString('base64'))).toString('base64');
     const res=await post('https://wmapp-api-v2.waimaimingtang.com/api/bwc/waimaimt-web-bwc/shopIndex/getShopList',aes(JSON.stringify(params),key),{'encrypt-key':encryptKey});
     let text=await res.text();const responseKey=res.headers.get('encrypt-key');

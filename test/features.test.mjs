@@ -53,7 +53,7 @@ test('歪麦：比例返只取会员字段，不以普通比例补值，未知�
 const { queryWaimai } = await import('../waimai.mjs');
 test('歪麦分页：短页仍透传完整游标，错误不可伪装为空名单', async () => {
   const cursors=[];
-  const result=await queryWaimai(10,{location:{city:'测试市'},pause:async()=>{},requestPage:async cursor=>{cursors.push(cursor);if(cursors.length===1)return {code:200,data:{data:[],scrollPageData:{opaque:{offset:15},flag:'keep'}}};throw Error('测试上游失败');}});
+  const result=await queryWaimai(10,{location:{city:'测试市'},pause:async()=>{},requestPage:async cursor=>{cursors.push(cursor);if(cursors.length===1)return {code:200,data:{data:[{shopName:'其他平台测试',overbearfoodList:[]}],scrollPageData:{opaque:{offset:15},flag:'keep'}}};throw Error('测试上游失败');}});
   assert.deepEqual(cursors,[null,{opaque:{offset:15},flag:'keep'}]);
   assert.equal(result.pagination.stopReason,'error');
   assert.equal(result.errors.length,1);
@@ -112,8 +112,8 @@ test('歪麦：hasMore=false 为明确末页；业务错误保留数值代码但
  assert.equal(failed.errors[0].upstreamCode,4000010);assert.ok(!JSON.stringify(failed).includes('private user'));
 });
 
-test('歪麦串行允许 20 次请求而不依赖短页，21 页拒绝',async()=>{
- let count=0;const r=await queryWaimai(20,{pause:async()=>{},requestPage:async()=>({code:200,data:{data:[],scrollPageData:{page:++count}}})});assert.equal(count,20);assert.equal(r.pagination.stopReason,'page_limit');await assert.rejects(()=>queryWaimai(21));
+test('歪麦产品混合名单最多两次请求，不依赖非空短页，21 页仍拒绝',async()=>{
+ let count=0;const r=await queryWaimai(20,{pause:async()=>{},requestPage:async()=>({code:200,data:{data:[{id:'w'+count,shopName:'测试'+count,shopPlatformType:2,overbearfoodList:[{takeawayPlatform:'meituan'}]}],scrollPageData:{page:++count}}})});assert.equal(count,2);assert.equal(r.pagination.stopReason,'page_limit');await assert.rejects(()=>queryWaimai(21));
 });
 
 test('地址搜索：解析字符串结果并拒绝空关键词，原始业务失败不泄露',async t=>{
@@ -139,7 +139,7 @@ test('歪麦加解密：动态密钥、会员列表响应和不透明游标端�
 
 test('歪麦诊断：逐页门店新增和排除原因可见，来源活动不丢失',async()=>{
  const r=await queryWaimai(10,{pause:async()=>{},requestPage:async()=>({code:200,data:{hasMore:false,data:[{id:'w1',shopName:'虚构店',shopPlatformType:1,overbearfoodList:[{id:'a',takeawayPlatform:'meituan',surplusNumber:2},{id:'b',takeawayPlatform:'eleme',surplusNumber:2},{id:'c',takeawayPlatform:'meituan',surplusNumber:0}]}]}})});
- assert.equal(r.pagination.stores,1);assert.equal(r.pagination.pages[0].newStores,1);assert.equal(r.pagination.filteredActivities,2);assert.equal(r.pagination.excludedOtherPlatform,1);assert.equal(r.pagination.excludedSoldOut,1);
+ assert.equal(r.pagination.stores,1);assert.equal(r.pagination.pages[0].newStores,1);assert.equal(r.pagination.filteredActivities,1);assert.equal(r.pagination.excludedOtherPlatform,1);assert.equal(r.pagination.excludedSoldOut,0);assert.equal(r.pagination.retainedSoldOut,1);
 });
 
 test('联合采集：小蚕身份配置失败仍尝试歪麦并保留部分结果',async t=>{

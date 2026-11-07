@@ -73,3 +73,12 @@ test('手机：地址搜索仅显式触发并限流；旧地图反查入口拒�
  await assert.rejects(f.app.request('/api/location-search',{keyword:'再次搜索'}),/较频繁/);
  const other=setup({reverse:async()=>{legacyCalls++;return loc;}});await assert.rejects(other.app.request('/api/location-reverse',{lat:34,lng:108}),/未支持/);assert.equal(legacyCalls,0);
 });
+
+test('手机默认20页，可选10/20；两页歪麦计划与失败统计独立保存，旧结果不覆盖',async()=>{
+ let blocked=false,received,saved={};
+ const pagination={full:{plannedPages:20,requests:1,stores:0,stopReason:'auth_required',partial:true},ratio:{plannedPages:20,requests:0,stores:0,stopReason:'auth_required',partial:true},waimai:{plannedPages:2,requests:1,stores:0,stopReason:'error',partial:true}};
+ const deps={storage:{read:()=>structuredClone(saved),write:v=>{saved=structuredClone(v);}},uuid:()=>crypto.randomUUID(),codeVersion:'test',cooldownMs:0,collect:async pages=>{received=pages;return blocked?{source:'live',full:[],ratio:[],errors:[{source:'waimai',message:'合成错误'}],coverage:[],pagination}:structuredClone(data);}};
+ const app=createMobileApp(deps);await setLocation(app);const value=()=>app.request('/api/state');
+ await app.request('/api/query',{locationKey:(await value()).locationKey});await done(app);assert.equal(received,20);const prior=(await value()).report;
+ blocked=true;await app.request('/api/query',{locationKey:(await value()).locationKey});await done(app);assert.deepEqual((await value()).report,prior);assert.deepEqual((await value()).attempt.pagination,pagination);assert.deepEqual((await createMobileApp(deps).request('/api/state')).attempt.pagination,pagination);
+});

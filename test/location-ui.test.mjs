@@ -163,3 +163,8 @@ test('结果提示：新查询进行中展开绿色提示，完成后同次查�
  await p.flush();await p.refresh();assert.equal((await p.state()).attempt.status,'partial');
  assert.equal(p.element('scope-note').open,true,'同次查询完成不能再次重置用户已展开的提示');
 });
+
+test('完全失败的本次统计直接可见且不混为旧结果统计，保留历史位置提示',async()=>{
+ const stored=partialSnapshot();stored.snapshot.attempt.status='blocked';stored.snapshot.attempt.generatedAt='2026-11-07T00:01:00.000Z';stored.snapshot.attempt.pagination={full:{plannedPages:20,requests:1,stores:0,partial:true,stopReason:'auth_required'},ratio:{plannedPages:20,requests:0,stores:0,partial:true,stopReason:'auth_required'},waimai:{plannedPages:2,requests:1,stores:0,partial:true,stopReason:'error'}};
+ const p=await page({stored});assert.equal(p.element('attempt-critical').hidden,false);const text=p.element('attempt-critical').textContent;assert.match(text,/计划最多 20 页 \/ 实际请求 0 次/);assert.match(text,/计划最多 2 页/);assert.match(text,/要求登录/);assert.match(text,/历史名单/);assert.match(p.element('scope-summary').textContent,/历史结果/);
+});

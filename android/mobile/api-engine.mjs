@@ -25,7 +25,7 @@ export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collec
  }
  async function run(pages,context,chosen){
   const started=clock();let data={};
-  try{data=await collect(pages,{location:chosen,log:message=>{progress=message;}});const report={...buildReport(data),context};snapshot.attempt={status:report.status,generatedAt:report.generatedAt,context,errors:report.errors};if(report.status!=='blocked')snapshot.report=report;}
+  try{data=await collect(pages,{location:chosen,log:message=>{progress=message;}});const report={...buildReport(data),context};snapshot.attempt={status:report.status,generatedAt:report.generatedAt,context,errors:report.errors,pagination:report.pagination};if(report.status!=='blocked')snapshot.report=report;}
   catch{snapshot.attempt={status:'blocked',generatedAt:new Date(clock()).toISOString(),context,errors:[{source:'query',message:'本轮查询失败，请检查网络、位置或手机凭证设置；上次名单保留'}]};}
   finally{
    diagnostic=diagnosticSummary({...data,config:{hasWmToken:!!config().hasWmToken,hasAmapKey:false,publicMode:false},queryId:context.queryId,codeVersion,pages,durationMs:clock()-started,status:snapshot.attempt.status,errors:snapshot.attempt.errors});
@@ -68,7 +68,7 @@ export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collec
    if(locating)throw Error('正在定位，请等待定位保存后再查询');
    if(busy)throw Error('查询已在进行中，请等待');if(!location)throw Error('请先设置查询位置');
    if(value?.locationKey!==keyOf(location))throw Error('查询位置已变化，请确认位置后重试');
-   const pages=value?.pages??10;if(![10,20].includes(pages))throw Error('每类页数只可选 10 或 20');
+   const pages=value?.pages??20;if(![10,20].includes(pages))throw Error('每类页数只可选 10 或 20');
    if(clock()<nextAllowedAt)throw Error('请稍等片刻再查询，避免频繁请求上游');
    const context={queryId:uuid(),codeVersion,locationLabel:location.label,locationKey:keyOf(location),pages};const prior=snapshot;
    snapshot={...snapshot,attempt:{status:'running',context,generatedAt:new Date(clock()).toISOString(),errors:[]}};busy=true;progress='准备查询…';nextAllowedAt=clock()+cooldownMs;

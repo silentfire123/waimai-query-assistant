@@ -30,7 +30,7 @@ test('匹配只接受同平台 ID 或完整同名候选，保留分店边界', (
   const noId=[{...full[0],meituan_poi_id:undefined}];
   assert.equal(compare(noId,ratio).counts.candidatePairs,1);
   assert.equal(compare(noId,[{...ratio[0],name:'测试饭店（乙店）'}]).counts.candidatePairs,0);
-  assert.equal(compare(full,[{...ratio[0],plan_activity_info_list:[{ratio:600,inventory:0}]}]).counts.ratioStores,0);
+  assert.equal(compare(full,[{...ratio[0],plan_activity_info_list:[{ratio:600,inventory:0}]}]).counts.ratioStores,1);
   assert.equal(compare(full,ratio).ratioStores[0].activities[0].ratioPercent,6);
 });
 test('报告演示隔离和 HTML 转义', async () => {
@@ -47,7 +47,7 @@ test('初始页面、静态资源、本机边界和配置路径不可访问', as
   const state=await app.getState();assert.equal(state.location,null);assert.equal(state.report,null);
   assert.match(await (await fetch(app.base)).text(),/外卖查询助手/);
   assert.equal((await fetch(app.base+'/app.js')).status,200);
-  assert.match(await (await fetch(app.base)).text(),/<option value="10" selected>每类最多 10 页<\/option>/);
+  assert.match(await (await fetch(app.base)).text(),/<option value="20" selected>最多 20 页（默认）<\/option>/);
   for(const route of ['/data/settings.json','/poc.mjs','/.git/config']) assert.equal((await fetch(app.base+route)).status,404);
   const hostStatus=await new Promise((resolve,reject)=>{const req=http.get(app.base+'/api/state',{headers:{Host:'evil.example'}},res=>{res.resume();resolve(res.statusCode);});req.on('error',reject);});
   assert.equal(hostStatus,403);
@@ -103,7 +103,7 @@ test('全部失败保留上次结果，演示不覆盖缓存', async t => {
 test('冷却时间限制与异常恢复', async t => {
   let requestedPages=0;const app=await setup(t,{cooldownMs:10000,collect:async pages=>{requestedPages=pages;throw Error('测试断网');}});
   await app.post('/api/location',location);await app.post('/api/query');const s=await app.done();
-  assert.equal(requestedPages,10);assert.equal(s.attempt.status,'blocked');assert.equal(s.busy,false);assert.equal(s.report,null);assert.ok(s.nextAllowedAt>Date.now());assert.ok(s.nextAllowedAt<Date.now()+11000);
+  assert.equal(requestedPages,20);assert.equal(s.attempt.status,'blocked');assert.equal(s.busy,false);assert.equal(s.report,null);assert.ok(s.nextAllowedAt>Date.now());assert.ok(s.nextAllowedAt<Date.now()+11000);
   assert.equal((await app.post('/api/query')).status,429);
 });
 test('真实协议边界：WAF 首次即停，不冒充空列表', async t => {
@@ -174,12 +174,12 @@ test('有效分页：重复内容仍推进游标，并区分请求、内容、�
   };
   t.after(()=>{globalThis.fetch=original;});
   const result=await queryLive(3,{location,log:()=>{}});
-  assert.equal(compare(result.full,result.ratio).counts.fullStores,2,'重复内容页携带的新游标不能丢失');
+  assert.equal(compare(result.full,result.ratio).counts.fullStores,3,'重复内容页携带的新游标不能丢失');
   assert.deepEqual(inputs,[null,'cursor-1','cursor-2']);
   const stats=buildReport(result).pagination.full;
   assert.equal(stats.requests,3);assert.equal(stats.uniquePages,2);assert.equal(stats.duplicatePages,1);
-  assert.equal(stats.rawItems,60);assert.equal(stats.classifiedItems,57);assert.equal(stats.eligibleActivities,51);assert.equal(stats.filteredActivities,6);
-  assert.equal(stats.stores,2);assert.deepEqual(stats.pages.map(p=>p.newStores),[1,0,1]);
+  assert.equal(stats.rawItems,60);assert.equal(stats.classifiedItems,57);assert.equal(stats.eligibleActivities,54);assert.equal(stats.filteredActivities,3);
+  assert.equal(stats.stores,3);assert.deepEqual(stats.pages.map(p=>p.newStores),[2,0,1]);
   assert.equal(stats.pages[1].cursorChanged,true);assert.equal(stats.stopReason,'page_limit');
 });
 
@@ -355,7 +355,7 @@ test('固定返展示：网页与导出报告保留金额、未知门槛、商�
 });
 
 
-test('固定返：同店不同商品保留多条活动，重复活动去重，库存为零仍过滤', async t => {
+test('固定返：同店不同商品保留多条活动，重复活动去重，库存为零仍保留', async t => {
   const a=productPromotion('same',{store_product:{name:'套餐甲'}});
   const b={...a,store_product:{name:'套餐乙'}};
   const original=globalThis.fetch;
@@ -363,7 +363,8 @@ test('固定返：同店不同商品保留多条活动，重复活动去重，�
     ?{feed_items:[a,a,b,{...productPromotion('sold'),left_number:0}]}:{list:[]});
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
-  assert.equal(report.counts.fullStores,1);assert.equal(report.fullStores[0].activities.length,2);
+  assert.equal(report.counts.fullStores,2);assert.equal(report.fullStores[0].activities.length,2);
+  assert.equal(report.fullStores[1].activities[0].inventoryState,'sold_out');
   assert.deepEqual(report.fullStores[0].activities.map(a=>a.productName),['套餐甲','套餐乙']);
   globalThis.fetch=original;
   const app=await setup(t,{collect:async()=>({...data(),full:[{...full[0],meituan_order_money:null}]})});
@@ -420,3 +421,12 @@ test('位置限流：第二次搜索429，且不触发采集',async t=>{const or
 test('查询前落盘失败：返回503且不调用上游，不永久busy',async t=>{let calls=0;const app=await setup(t,{collect:async()=>{calls++;return data();}});await app.post('/api/location',location);await fs.mkdir(path.join(app.dir,'latest.json.tmp'));const response=await app.post('/api/query',{pages:10});assert.equal(response.status,503);assert.equal(calls,0);assert.equal((await app.getState()).busy,false);});
 test('计算模块静态接口：可加载且MIME正确',async t=>{const app=await setup(t);const r=await fetch(app.base+'/calculator.mjs');assert.equal(r.status,200);assert.match(r.headers.get('content-type'),/text.javascript/);assert.match(await r.text(),/export function calculate/);});
 test('尚无查询时诊断明确404而非下载空对象',async t=>{const app=await setup(t);const r=await fetch(app.base+'/api/diagnostics');assert.equal(r.status,404);assert.match((await r.json()).error,/尚无查询诊断/);});
+
+test('桌面默认20页；全部失败保留旧结果并留存本次实际采集统计',async t=>{
+ let blocked=false,received;
+ const pagination={full:{plannedPages:20,requests:1,stores:0,stopReason:'auth_required',partial:true},ratio:{plannedPages:20,requests:0,stores:0,stopReason:'auth_required',partial:true},waimai:{plannedPages:2,requests:1,stores:0,stopReason:'error',partial:true}};
+ const app=await setup(t,{collect:async pages=>{received=pages;return blocked?{source:'live',full:[],ratio:[],errors:[{source:'full',message:'合成鉴权失败'}],coverage:[],pagination}:data();}});
+ await app.post('/api/location',location);await app.post('/api/query');const prior=await app.done();assert.equal(received,20);
+ blocked=true;await app.post('/api/query');const next=await app.done();assert.deepEqual(next.report,prior.report);assert.deepEqual(next.attempt.pagination,pagination);
+ const stored=JSON.parse(await fs.readFile(path.join(app.dir,'latest.json'),'utf8'));assert.deepEqual(stored.attempt.pagination,pagination);
+});

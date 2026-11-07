@@ -19,16 +19,19 @@ function message(text, error = false) {
 }
 const emptyIcon = '<svg viewBox="0 0 48 48" aria-hidden="true"><circle cx="19" cy="22" r="12"/><circle cx="29" cy="22" r="12"/><path d="M19 36v6m10-6v6"/></svg>';
 const sourceName=a=>a.source==='waimai'?'歪麦（会员口径）':'小蚕';
+const inventoryText=a=>a.inventory===0?'明确无名额（保留比对）':a.inventory==null || a.inventory<0?'名额未知':`接口余量 ${money(a.inventory)}（资格未核实）`;
+const confirmedMatch=m=>m.confirmed===true || m.basis==='相同美团门店 ID';
+const combinationText=m=>(m.combinations??[]).map(c=>c.split('×').map(v=>v==='waimai'?'歪麦':'小蚕').join('满返 × ')+'比例返').join('；');
 function fullActivities(store) {
   return store.activities.map(a => `<li><strong>${sourceName(a)}</strong> · ${a.rebate == null ? '会员满返金额待填写' : a.rebateType === 'fixed' || a.minPay == null
     ? `固定返 <strong>¥${money(a.rebate)}</strong> · 实付门槛未明确`
-    : `实付满 <strong>¥${money(a.minPay)}</strong> 返 <strong>¥${money(a.rebate)}</strong>`}${a.referenceGrade ? ` · 接口最大阶梯参考：满 ${esc(a.referenceGrade.fullMoney)} 返 ${esc(a.referenceGrade.rebateMoney)}（不是最低门槛，会员金额待填写）` : ''}${a.productName ? ` · 指定商品：${esc(a.productName)}` : ''} · ${esc(a.condition)}</li>`).join('');
+    : `实付满 <strong>¥${money(a.minPay)}</strong> 返 <strong>¥${money(a.rebate)}</strong>`}${a.referenceGrade ? ` · 接口最大阶梯参考：满 ${esc(a.referenceGrade.fullMoney)} 返 ${esc(a.referenceGrade.rebateMoney)}（不是最低门槛，会员金额待填写）` : ''}${a.productName ? ` · 指定商品：${esc(a.productName)}` : ''} · ${esc(a.condition)} · <strong>${inventoryText(a)}</strong></li>`).join('');
 }
 function ratioActivities(store) {
-  return store.activities.map(a => `<li><strong>${sourceName(a)}</strong> · 接口比例 <strong>${money(a.ratioPercent)}%</strong>${a.maxCashback == null ? '' : ` · 接口封顶 ¥${money(a.maxCashback)}`}${a.userRatioPercent == null ? '' : ` · 用户字段 ${money(a.userRatioPercent)}%`}${a.userMaxCashback == null ? '' : ` · 用户封顶 ¥${money(a.userMaxCashback)}`} · ${esc(a.condition)}</li>`).join('');
+  return store.activities.map(a => `<li><strong>${sourceName(a)}</strong> · 接口比例 <strong>${money(a.ratioPercent)}%</strong>${a.maxCashback == null ? '' : ` · 接口封顶 ¥${money(a.maxCashback)}`}${a.userRatioPercent == null ? '' : ` · 用户字段 ${money(a.userRatioPercent)}%`}${a.userMaxCashback == null ? '' : ` · 用户封顶 ¥${money(a.userMaxCashback)}`} · ${esc(a.condition)} · <strong>${inventoryText(a)}</strong></li>`).join('');
 }
 function row(store, kind, match, index) {
-  return `<article class="store"><div>${match ? `<span class="badge ${match.basis === '相同美团门店 ID' ? '' : 'candidate'}">${match.basis === '相同美团门店 ID' ? '同 ID 重合' : '同名待确认'}</span>` : ''}<h3>${esc(store.name)}</h3><ul class="activities">${match ? fullActivities(match.full) + ratioActivities(match.ratio) : kind === 'full' ? fullActivities(store) : ratioActivities(store)}</ul>${match ? calculatorMarkup(match,index) : ''}</div><span class="store-kind">${match ? '两类名单交集' : kind === 'full' ? '实付满返' : '比例返'}</span></article>`;
+  return `<article class="store"><div>${match ? `<span class="badge ${confirmedMatch(match) ? '' : 'candidate'}">${confirmedMatch(match) ? '同 ID 重合' : '同名待确认'}</span>` : ''}<h3>${esc(store.name)}</h3>${match?.combinations?.length ? `<p class="form-help">${esc(combinationText(match))} · ${esc(match.basis)}</p>` : ''}<ul class="activities">${match ? fullActivities(match.full) + ratioActivities(match.ratio) : kind === 'full' ? fullActivities(store) : ratioActivities(store)}</ul>${match ? calculatorMarkup(match,index) : ''}</div><span class="store-kind">${match ? '两类名单交集' : kind === 'full' ? '实付满返' : '比例返'}</span></article>`;
 }
 function renderList() {
   const report = demo || state?.report;
@@ -83,16 +86,16 @@ function render() {
       return '';
     };
     const legacyActual = fullRead != null && ratioRead != null ? '本次实际读取：满返 ' + fullRead + '/' + limit + ' 页' + stopReason('full') + '；比例返 ' + ratioRead + '/' + limit + ' 页' + stopReason('ratio') + '。' : '';
-    const stops = { upstream_end: '上游明确无下一页', page_limit: '达到本次请求上限，非全部商家', empty_page: '返回空页', short_page: '响应不足一页', missing_cursor: '未提供下一页游标', no_progress: '连续两次无新增且游标未推进', waf: '上游拦截', error: '请求失败' };
+    const stops = { upstream_end: '上游明确无下一页', page_limit: '达到本次请求上限，非全部商家', empty_page: '返回空页', short_page: '响应不足一页', missing_cursor: '未提供下一页游标', no_progress: '连续两次无新增门店', waf: '上游拦截', auth_required:'要求登录或身份校验', not_requested:'尚未请求', error: '请求失败' };
     const actual = report.pagination ? ['full', 'ratio', 'waimai'].map(kind => {
       const stats = report.pagination[kind];
-      if(kind==='waimai')return stats ? '歪麦：计划最多 '+stats.plannedPages+' 页，实际请求 '+stats.requests+' 次，累计新增 '+stats.stores+' 家（'+(stops[stats.stopReason] || stats.stopReason)+'）' : '歪麦未请求';
-      return !stats ? `${kind === 'full' ? '满返' : '比例返'}未请求` : `${kind === 'full' ? '满返' : '比例返'}：计划最多 ${stats.plannedPages} 页，实际请求 ${stats.requests} 次，${stats.uniquePages} 个不同内容页，${stats.duplicatePages} 个重复响应，新增 ${stats.stores} 家（${stops[stats.stopReason] || '停止原因未知'}）`;
+      if(kind==='waimai')return stats ? '歪麦混合类别（非每类两页）：计划最多 '+stats.plannedPages+' 页，实际请求 '+stats.requests+' 次，累计新增 '+stats.stores+' 家（满返 '+stats.fullStores+' / 比例返 '+stats.ratioStores+'）；保留无名额 '+(stats.retainedSoldOut??0)+' 条、名额未知 '+(stats.retainedUnknownInventory??0)+' 条（'+(stops[stats.stopReason] || stats.stopReason)+'）' : '歪麦未请求';
+      return !stats ? `${kind === 'full' ? '满返' : '比例返'}未请求` : `${kind === 'full' ? '满返' : '比例返'}：计划最多 ${stats.plannedPages} 页，实际请求 ${stats.requests} 次，${stats.uniquePages} 个不同内容页，${stats.duplicatePages} 个重复响应，新增 ${stats.stores} 家；保留无名额 ${stats.retainedSoldOut??0} 条、名额未知 ${stats.retainedUnknownInventory??0} 条（${stops[stats.stopReason] || '停止原因未知'}）`;
     }).join('；') + '。' + (report.pagination.full?.excludedProductItems ? `另有 ${report.pagination.full.excludedProductItems} 条商品活动未提供实付门槛，未纳入满返比对。` : '') : legacyActual;
     const scopeKey = state.attempt?.context?.queryId ?? state.attempt?.generatedAt ?? report.context?.queryId ?? report.generatedAt;
     if (scopeNoticeKey !== scopeKey) { $('scope-note').open = false; scopeNoticeKey = scopeKey; }
     $('scope-summary').textContent = !state.resultMatchesLocation ? '历史结果，与当前位置不同 · 采集范围与统计' : '采集范围与统计 · 有限样本，非全量';
-    $('scope-detail').textContent = [!state.resultMatchesLocation ? '以下为历史结果，不对应当前设置的位置。重新查询后才会更新。' : '', report.status === 'partial' ? '本次取得了部分名单，重合结论可能漏项。具体原因见上方提醒。' : '这是一次有限样本，不保证全量。增加页数不会扩大配送半径；重复内容不会增加商家数。接口比例未核对到账口径，不能据此保证实际返现。', actual].filter(Boolean).join(' ');
+    $('scope-detail').textContent = [!state.resultMatchesLocation ? '以下为历史结果，不对应当前设置的位置。重新查询后才会更新。' : '', report.status === 'partial' ? '本次取得了部分名单，重合结论可能漏项。具体原因见上方提醒。' : '这是一次有限样本，不保证全量。增加页数不会扩大配送半径；重复内容不会增加商家数。接口比例未核对到账口径，不能据此保证实际返现。', actual, report.notes.find(n=>n.startsWith('小蚕上游距离排序')) || '', '歪麦上游按综合排序请求，未证实分类独立分页；只计划采集一次混合名单、最多两页。上游未返回的活动不能恢复。'].filter(Boolean).join(' ');
   }
   const attempt = state.attempt;
   const errors = !demo && attempt ? attempt.errors || [] : [];
@@ -100,14 +103,15 @@ function render() {
   $('attempt').className = partialAttempt ? 'notice warning' : 'notice error';
   $('attempt').setAttribute('role', partialAttempt ? 'status' : 'alert');
   $('attempt').hidden = !errors.length && !attempt?.persistenceError || !!demo;
+  const attemptStats = attempt?.pagination ? Object.entries(attempt.pagination).map(([kind,s])=>`${({full:'小蚕满返',ratio:'小蚕比例返',waimai:'歪麦混合类别'})[kind] || kind}：计划最多 ${s.plannedPages} 页 / 实际请求 ${s.requests} 次 / 有效门店 ${s.stores} 家 / ${s.partial?'部分样本':'上游已结束'} / 停止：${({waf:'上游拦截',auth_required:'要求登录或身份校验',error:'请求失败',page_limit:'达到上限，非全量',empty_page:'空页',upstream_end:'上游明确结束',no_progress:'无新增',missing_cursor:'缺少游标',short_page:'不足一页'})[s.stopReason] || s.stopReason}`).join('；') : '';
   const attemptText = errors.map(e => `${({full:'小蚕实付满返', ratio:'小蚕比例返', waimai:'歪麦', query:'查询'})[e.source] || e.source}：${e.message}${e.upstreamCode ? `（上游业务码 ${esc(e.upstreamCode)}）` : ''}`).join('；') + (attempt?.persistenceError ? '；' + attempt.persistenceError : '') + (errors.length && state.report && attempt?.generatedAt !== state.report.generatedAt ? '。未覆盖上次结果，以下仍为历史名单。' : '');
   const attemptKey = attempt?.context?.queryId ?? attempt?.generatedAt;
   if (attemptNoticeKey !== attemptKey) { $('attempt-details').open = false; attemptNoticeKey = attemptKey; }
   $('attempt-summary').textContent = '部分渠道失败，名单可能不完整';
   $('attempt-details').hidden = !partialAttempt;
-  $('attempt-detail').textContent = partialAttempt ? attemptText : '';
+  $('attempt-detail').textContent = partialAttempt ? [attemptText,attemptStats].filter(Boolean).join(' ') : '';
   $('attempt-critical').hidden = !!partialAttempt;
-  $('attempt-critical').textContent = partialAttempt ? '' : attemptText;
+  $('attempt-critical').textContent = partialAttempt ? '' : [attemptText,attemptStats].filter(Boolean).join(' ');
   $('query-id').textContent=state.attempt?.context?.queryId ? '查询编号 '+state.attempt.context.queryId+' · 代码版本 '+(state.codeVersion??'未知') : '代码版本 '+(state.codeVersion??'未知');
   const counts = report?.counts;
   $('count-overlap').textContent = counts ? `${counts.confirmed} 确认 / ${counts.candidatePairs} 待确认` : '0';
@@ -159,8 +163,8 @@ refresh();
 
 function calculatorMarkup(match,index){
  const best=bestCombination(match.full.activities,match.ratio.activities);
- const options=(items,chosen,kind)=>items.map((a,i)=>`<option value="${i}"${i===chosen?' selected':''}>${i+1}. ${sourceName(a)} · ${kind==='ratio'?(a.ratioPercent==null?'会员比例待填写':money(a.ratioPercent)+'%')+' / 封顶¥'+money(a.maxCashback):'满¥'+money(a.minPay)+'返¥'+money(a.rebate)} · ${esc(a.condition??'条件未提供')}</option>`).join('');
- return `<section class="calculator" id="calc-${index}" aria-label="返后净支出计算器"><label>订单实付（元）<input data-field="pay" type="number" min="0" step="0.01" inputmode="decimal" placeholder="请输入实际支付金额"></label><output class="net" aria-live="polite"></output><details><summary>展开切换活动与来源 / 填写缺失值</summary><label>一份满返<select data-field="full">${options(match.full.activities,best?.fullIndex,'full')}</select></label><label>一份比例返<select data-field="ratio">${options(match.ratio.activities,best?.ratioIndex,'ratio')}</select></label><div class="manual-fields"><label>会员满返金额（元，缺失时填写）<input data-field="rebate" type="number" min="0" step="0.01" inputmode="decimal"></label><label>实付门槛（元，未知可留空）<input data-field="threshold" type="number" min="0" step="0.01" inputmode="decimal"></label><label>会员比例（%，缺失时填写）<input data-field="percent" type="number" min="0" step="0.01" inputmode="decimal"></label><label>封顶（元，缺失时填写）<input data-field="cap" type="number" min="0" step="0.01" inputmode="decimal"></label></div><button type="button" class="text-button" data-reset>恢复自动最优组合</button></details><p class="form-help">每次只算一份满返 + 一份比例返；不判断能否叠加，不保证到账。同名候选未确认是同一门店。</p></section>`;
+ const options=(items,chosen,kind)=>items.map((a,i)=>`<option value="${i}"${i===chosen?' selected':''}>${i+1}. ${sourceName(a)} · ${kind==='ratio'?(a.ratioPercent==null?'会员比例待填写':money(a.ratioPercent)+'%')+' / 封顶¥'+money(a.maxCashback):'满¥'+money(a.minPay)+'返¥'+money(a.rebate)} · ${esc(a.condition??'条件未提供')} · ${inventoryText(a)}</option>`).join('');
+ return `<section class="calculator" id="calc-${index}" aria-label="返后净支出计算器"><label>订单实付（元）<input data-field="pay" type="number" min="0" step="0.01" inputmode="decimal" placeholder="请输入实际支付金额"></label><output class="net" aria-live="polite"></output><details><summary>展开切换活动与来源 / 填写缺失值</summary><label>一份满返<select data-field="full">${options(match.full.activities,best?.fullIndex,'full')}</select></label><label>一份比例返<select data-field="ratio">${options(match.ratio.activities,best?.ratioIndex,'ratio')}</select></label><div class="manual-fields"><label>会员满返金额（元，缺失时填写）<input data-field="rebate" type="number" min="0" step="0.01" inputmode="decimal"></label><label>实付门槛（元，未知可留空）<input data-field="threshold" type="number" min="0" step="0.01" inputmode="decimal"></label><label>会员比例（%，缺失时填写）<input data-field="percent" type="number" min="0" step="0.01" inputmode="decimal"></label><label>封顶（元，缺失时填写）<input data-field="cap" type="number" min="0" step="0.01" inputmode="decimal"></label></div><button type="button" class="text-button" data-reset>恢复自动最优组合</button></details><p class="form-help">每次只算一份满返 + 一份比例返；无名额也参与金额试算，不代表可报名；不判断能否叠加，不保证到账。同名候选未确认是同一门店。</p></section>`;
 }
 function bindCalculator(match,index){
  const panel=$('calc-'+index),field=k=>panel.querySelector(`[data-field="${k}"]`);

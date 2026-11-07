@@ -17,3 +17,7 @@
 
 The standalone test APK uses the Android framework and a local JDK/Google Android SDK build toolchain, not an embedded Node runtime or bundled third-party JavaScript libraries. SDK tools are not redistributed. Protocol cryptography remains compatibility code for the previously documented upstream; see android/README.md for legacy-crypto limits and device-validation gaps.
 Official toolchain references: https://developer.android.com/tools and https://developer.android.com/studio . The APK asset packer uses an explicit public-source allowlist. No private credentials, cached results, SDK archives, test fixtures, or signing keys are included.
+
+## 2026-11-07 筛选、排序、分页与展示对照
+
+重新用 `git ls-remote` 核对参考后端main仍为 `7e2db82ad6095701889255b8994b4823b5ddab05`，README关联前端main为 `53f9ade65a1a5eadb05bbd5d9848ee49611234b4`。阅读了HTTP、Controller、DTO／VO、Service到HomeView的真实调用链；参考界面未启动运行，不称效果验收。特别注意：排序控件隐藏、`sort:1`无距离值域证明、“可抢/全部”开关不证明实际服务端过滤、零库存显示不能代替未知状态、参考解析漏source2不照搬。固定源码链接和单变量匿名观察详见 [本轮实施记录](docs/overlap-coverage-implementation-2026-11-07.md)。不新增依赖、不使用参考作者身份／硬编码地点／代理重试或结果截断策略。

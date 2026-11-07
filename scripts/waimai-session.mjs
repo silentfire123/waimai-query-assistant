@@ -1,4 +1,4 @@
-import {createWaimaiClient,queryWaimai} from '../waimai.mjs';
+import {createWaimaiClient} from '../waimai.mjs';
 export async function checkWaimaiSession({token,location,fetchImpl=fetch,pause}={}){
  if(typeof token!=='string'||!token.trim())return {status:'needs_token'};
  token=token.trim();
@@ -6,11 +6,22 @@ export async function checkWaimaiSession({token,location,fetchImpl=fetch,pause}=
  if(!location||typeof location.city!=='string'||!location.city.trim()||location.city.length>40||typeof location.lat!=='number'||typeof location.lng!=='number'||!Number.isFinite(location.lat)||!Number.isFinite(location.lng)||Math.abs(location.lat)>90||Math.abs(location.lng)>180)return {status:'needs_location'};
  try{
   const requestPage=await createWaimaiClient(location,{token:token.trim(),fetchImpl});
-  const cursors=new Set();let repeatedCursor=false,requests=0;
-  const distinctPage=async cursor=>{const key=JSON.stringify(cursor);if(cursors.has(key)){repeatedCursor=true;throw Error('Repeated pagination cursor');}cursors.add(key);requests++;return requestPage(cursor);};
-  const result=await queryWaimai(3,{location,requestPage:distinctPage,pause});
-  const upstreamCode=result.errors.find(e=>Number.isInteger(e.upstreamCode))?.upstreamCode;
-  return {status:upstreamCode===4000010?'login_required':repeatedCursor?'inconclusive':result.errors.length===0&&result.pagination.pages.length===3?'third_page_verified':result.errors.length===0?'inconclusive':'request_failed',requests,completedPages:result.pagination.pages.length,...(upstreamCode===undefined?{}:{upstreamCode})};
+  // 独立的既有“本人凭证三页验证”工具，不调用产品的两页混合采集器。
+  // 必须显式提供凭证；产品 UI/collectAll 即使有凭证也不会因此扩页。
+  const cursors=new Set();let cursor=null,requests=0,completedPages=0;
+  for(let page=0;page<3;page++){
+    const key=JSON.stringify(cursor);
+    if(cursors.has(key))return {status:'inconclusive',requests,completedPages};
+    cursors.add(key);requests++;
+    const json=await requestPage(cursor);
+    if(json?.code!==200||!Array.isArray(json.data?.data))return {status:json?.code===4000010?'login_required':'request_failed',requests,completedPages,...(Number.isInteger(json?.code)?{upstreamCode:json.code}:{})};
+    if(json.data.data.some(shop=>!shop?.shopName||!Array.isArray(shop.overbearfoodList)||shop.overbearfoodList.some(sku=>!sku||typeof sku!=='object')))return {status:'request_failed',requests,completedPages};
+    completedPages++;
+    if(completedPages===3)return {status:'third_page_verified',requests,completedPages};
+    if(json.data.hasMore===false||json.data.scrollPageData==null)return {status:'inconclusive',requests,completedPages};
+    cursor=json.data.scrollPageData;
+    await (pause??(ms=>new Promise(r=>setTimeout(r,ms))))(800);
+  }
  }catch{return {status:'request_failed'};}
 }
 

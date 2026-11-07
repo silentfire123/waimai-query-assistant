@@ -5,10 +5,10 @@ import {checkWaimaiSession} from '../scripts/waimai-session.mjs';
 const location={city:'测试市',lat:30,lng:110};
 test('歪麦登录验证：未提供凭证不请求网络',async()=>{let calls=0;const result=await checkWaimaiSession({location,token:'',fetchImpl:async()=>{calls++;throw Error('must not call');}});assert.equal(result.status,'needs_token');assert.equal(calls,0);});
 
-function upstream({rejectThird=false,endEarly=false,fail=false,repeatCursor=false}={}){
+function upstream({rejectThird=false,endEarly=false,fail=false,repeatCursor=false,malformed=false}={}){
  const pair=crypto.generateKeyPairSync('rsa',{modulusLength:1024});let requests=0;const seen=[];
  const payload={publicKey:pair.publicKey.export({type:'spki',format:'pem'}),privateKey:pair.privateKey.export({type:'pkcs8',format:'pem'})};const c=crypto.createCipheriv('aes-128-ecb',Buffer.from('jnd674751fh6fkgu'),null);const encrypted=Buffer.concat([c.update(JSON.stringify(payload)),c.final()]).toString('base64');
- return {seen,get requests(){return requests;},fetchImpl:async(url,options)=>{seen.push({url,token:options.headers.token});if(fail)throw Error('PRIVATE_TOKEN_LEAK_ME');if(url.includes('newServiceConfig'))return Response.json({code:1,data:encrypted});requests++;if(rejectThird&&requests===3)return Response.json({code:4000010,msg:'PRIVATE_SERVER_MESSAGE'});return Response.json({code:200,data:{data:[],hasMore:!endEarly,scrollPageData:{opaque:repeatCursor?1:requests}}});}};
+ return {seen,get requests(){return requests;},fetchImpl:async(url,options)=>{seen.push({url,token:options.headers.token});if(fail)throw Error('PRIVATE_TOKEN_LEAK_ME');if(url.includes('newServiceConfig'))return Response.json({code:1,data:encrypted});requests++;if(rejectThird&&requests===3)return Response.json({code:4000010,msg:'PRIVATE_SERVER_MESSAGE'});return Response.json({code:200,data:{data:malformed?[{shopName:'测试店',overbearfoodList:[null]}]:[],hasMore:!endEarly,scrollPageData:{opaque:repeatCursor?1:requests}}});}};
 }
 test('歪麦登录验证：同一凭证用于握手与三页，第三页成功才确认且只请求3页',async()=>{const fake=upstream(),token='fake-personal-token';const r=await checkWaimaiSession({location,token,fetchImpl:fake.fetchImpl,pause:async()=>{}});assert.equal(r.status,'third_page_verified');assert.equal(r.completedPages,3);assert.equal(fake.requests,3);assert.equal(fake.seen.length,4);assert.ok(fake.seen.every(s=>s.token===token));assert.ok(!JSON.stringify(r).includes(token));assert.ok(!JSON.stringify(r).includes('opaque'));});
 
@@ -54,3 +54,5 @@ test('会话CLI：--start成功后本机页面可访问，不需要全局公网�
 test('会话CLI：登录拒绝不启动服务',async t=>{const r=await cliFixture(t,{args:['--start'],mode:'rejected'});assert.equal(r.code,2);assert.ok(!r.stdout.includes('已启动本人会话本机服务'));});
 test('会话CLI：启动端口占用不关闭已有监听、不泄漏凭证',async t=>{const held=await listen();t.after(()=>new Promise(r=>held.close(r)));const r=await cliFixture(t,{args:['--start'],port:held.address().port});assert.equal(r.code,1);assert.equal(held.listening,true);assert.match(r.stderr,/本机服务无法启动/);assert.ok(!r.stderr.includes('fake-session-secret'));});
 test('会话CLI：三页成功但本地状态损坏，应区分预览启动失败和验证结论',async t=>{const r=await cliFixture(t,{args:['--start'],latestText:'{broken'});assert.equal(r.code,1);assert.match(r.stdout,/third_page_verified/);assert.match(r.stderr,/第三页已验证，但本机预览未启动/);assert.ok(!r.stderr.includes('fake-session-secret'));});
+
+test('歪麦登录验证：畸形活动结构立即停止，不把响应200当第三页通过',async()=>{const fake=upstream({malformed:true});const r=await checkWaimaiSession({location,token:'fake-personal-token',fetchImpl:fake.fetchImpl,pause:async()=>{}});assert.equal(r.status,'request_failed');assert.equal(r.requests,1);assert.equal(r.completedPages,0);assert.equal(fake.requests,1);});
