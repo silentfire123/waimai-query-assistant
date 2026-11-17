@@ -4,11 +4,11 @@
 
 **只读查询，不自动报名、不下单、不自动扫描。名单重合不代表返现可以叠加，试算不保证到账。**
 
-2026-11-17 修复：已定位旧固定 Referer 与 WAF 403 的关联，按参考格式生成每次请求的 Referer；保留匿名身份。满返 feed＋比例返专用接口已在 Node 和 Java HTTPS 实测返回活动。已构建本地 1.0.5 测试 APK，尚未发布 GitHub；手机真机仍待验证。详见 [修复记录](docs/waf-recovery-2026-11-17.md)。
+2026-11-17 修复：已定位旧固定 Referer 与 WAF 403 的关联，按参考格式生成每次请求的 Referer；保留匿名身份。满返 feed＋比例返专用接口已在 Node 和 Java HTTPS 实测返回活动。1.0.5 自用测试 APK 已发布 GitHub；手机真机仍待验证。详见 [修复记录](docs/waf-recovery-2026-11-17.md)。
 
 ## 手机使用
 
-- 已发布版本：[1.0.4 自用测试版](https://github.com/silentfire123/waimai-query-assistant/releases/tag/1.0.4)。本地新测试包为 **1.0.5 / versionCode=8**，含 Referer 修复，沿用原签名，可覆盖安装；见 [1.0.5 说明](docs/release-1.0.5.md)。1.0.5 尚未上传 GitHub，旧版附件不包含本次修复。
+- 当前版本：[1.0.5 自用测试版](https://github.com/silentfire123/waimai-query-assistant/releases/tag/1.0.5)。下载 Assets 中的 **waimai-assistant-1.0.5.apk**（versionCode=8），含 Referer 修复，沿用原签名，可覆盖安装；见 [1.0.5 说明](docs/release-1.0.5.md)。旧版 Release 和附件保留。
 - 1.0.4 保留无名额／名额未知活动、补齐四种来源组合并调整有界分页（versionCode=7），附 APK 与 SHA256SUMS.txt；沿用 1.0.3 测试签名，覆盖安装时不要卸载或清除数据。距离优先仍未打通，真机未完成验收，见 [发布说明](docs/release-1.0.4.md)。
 - 手机独立运行，不依赖电脑开机或云服务器；**查询最新活动仍需联网**。电脑与手机各存一份位置和结果，暂不自动同步。
 - 安装后打开「设置位置」→「获取当前位置」。成功即保存，无需再点保存；不需要配置地图 Key 或手填经纬度。也可搜索附近小区／公司，选中后保存。

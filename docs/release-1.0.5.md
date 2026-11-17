@@ -1,6 +1,6 @@
-# 1.0.5：小蚕WAF请求修复（本地自用测试包）
+# 1.0.5：小蚕WAF请求修复（自用测试版）
 
-日期：2026-11-17。已生成本地APK；尚未发布GitHub。
+已于2026-11-17 22:06:36（北京时间）发布[GitHub 1.0.5自用测试版](https://github.com/silentfire123/waimai-query-assistant/releases/tag/1.0.5)。标签指向`bb216461d95851440a50b3ccdf3a6ea3c21c7725`；APK和SHA256SUMS.txt均已上传，远端SHA256与本地一致。
 
 - 修复旧固定Referer导致本机匿名请求WAF 403：参照公开项目当前格式为每次请求生成新后缀，匿名身份仍为0。
 - 小蚕满返feed＋比例返专用接口：真实Node两页取得27家满返、10家比例返，无错误；Java首屏亦成功。前轮统一feed比例返的假设已由真实响应纠正。
@@ -9,7 +9,7 @@
 
 ## 安装
 
-本地文件`output/android/1.0.5/waimai-assistant-1.0.5.apk`，包名`local.waimai.assistant`，versionName=1.0.5、versionCode=8。
+下载Release的Assets中的`waimai-assistant-1.0.5.apk`。本地副本为`output/android/1.0.5/waimai-assistant-1.0.5.apk`，包名`local.waimai.assistant`，versionName=1.0.5、versionCode=8。
 
 与1.0.4使用相同签名证书，可直接覆盖安装。**不要卸载或清除数据**。本次不需要配置小蚕ID或抓包。
 

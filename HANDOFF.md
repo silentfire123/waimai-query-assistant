@@ -1,12 +1,12 @@
 # 接续开发入口
 
-## 2026-11-17 当前接续：Referer修复已实测，1.0.5本地包
+## 2026-11-17 当前接续：Referer修复已实测，1.0.5已发布
 
 - 用户确认官方小程序两类正常、助手一直匿名，并授权继续不抓包排查。未采集凭证、安装证书、使用参考作者身份或修改网络设置。
 - 旧固定Referer在Node/Java均403；仅替换Referer后满返200，恢复旧值又403。`core.mjs`按参考3eb3bd3的格式每次生成8位十六进制后缀；UA、匿名标识及签名算法保留。
 - **撤回此前仅据源码做的比例返统一feed迁移**：匿名`rebate_type:2`真实响应只有status；专用`GetMeiTuanPromotions`则返回list/pv_id。生产组合为满返feed＋比例返专用接口，旧导入保留。
 - 最终153项Node回归通过；真实Node两页满返27家、比例返10家，无错误；Java首屏12/5家，无错误。样本不代表全量、叠加或长期稳定。
-- 本地1.0.5 / versionCode=8，codeVersion=431f153ff402；原签名相同，v2/v3及资源门禁通过。`output/android/1.0.5/`含APK和SHA256SUMS.txt，尚未上传GitHub；已发布仍1.0.4。手机安装/原生运行待用户验收。
+- 1.0.5 / versionCode=8，codeVersion=431f153ff402；原签名相同，v2/v3及资源门禁通过。已于2026-11-17 22:06:36（北京时间）发布GitHub自用测试版，标签指向`bb216461d95851440a50b3ccdf3a6ea3c21c7725`，APK和SHA256SUMS.txt远端摘要与本地一致；旧版Release保留。手机安装/原生运行待用户验收。
 - 当前证据入口为 [WAF修复记录](docs/waf-recovery-2026-11-17.md)；前一阶段未恢复的结论保留于 [历史排查](docs/diagnosis-xiaochan-2026-11-17.md)，不覆盖当前实测。
 
 更新：2026-11-07（Asia/Shanghai）。先读当前 [README.md](README.md)、[PRODUCT.md](PRODUCT.md) 和 [QA.md](QA.md)，不要把归档中的旧页数、已停止的进程或曾经的排除规则当成当前状态。
