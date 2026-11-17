@@ -20,7 +20,7 @@ import java.util.concurrent.*;
 public class MainActivity extends Activity {
  private static final String ORIGIN="https://appassets.androidplatform.net";
  private WebView web;private PhoneStore store;private final Handler main=new Handler(Looper.getMainLooper());
- private final ExecutorService worker=Executors.newSingleThreadExecutor();private WaimaiClient wm;private String wmSession;
+ private final ExecutorService worker=Executors.newSingleThreadExecutor();
  private boolean resolvingLocation;private String locationRequest,exportRequest,exportText;private LocationListener locationListener;private final Map<String,Boolean> inFlight=new ConcurrentHashMap<>();
  @Override public void onCreate(Bundle state){super.onCreate(state);store=new PhoneStore(this);
   if(Build.VERSION.SDK_INT>=33)getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,this::handleBack);
@@ -60,14 +60,11 @@ public class MainActivity extends Activity {
      if(operation.equals("settings")){settings(id);return;}
      if(operation.equals("locate")){locate(id);return;}
      if(operation.equals("export")){export(id,input.getJSONObject("data"));return;}
-     if(!operation.equals("http")&&!operation.equals("wmInit")&&!operation.equals("wmPage")){reply(id,null,"未支持的手机操作");return;}
+     if(!operation.equals("http")){reply(id,null,"未支持的手机操作");return;}
      worker.execute(()->{try{
-      Object value;
-      if(operation.equals("http")){value=Upstream.browserRequest(input);}
-      else if(operation.equals("wmInit")){wm=null;wmSession=null;WaimaiClient next=new WaimaiClient(input.getJSONObject("location"),store.secrets().optString("WM_TOKEN"));wm=next;wmSession=UUID.randomUUID().toString();value=wmSession;}
-      else{if(wm==null||!Objects.equals(wmSession,input.getString("session")))throw new SecurityException();value=wm.page(input.opt("cursor"));}
+      Object value=Upstream.browserRequest(input);
       reply(id,value,null);
-     }catch(Exception error){reply(id,null,"手机联网、解密或鉴权失败，请检查网络及手机凭证设置；不会自动重试");}});
+     }catch(Exception error){reply(id,null,"手机联网或鉴权失败，请检查网络及小蚕凭证设置；不会自动重试");}});
     }catch(Exception error){reply(id,null,"手机操作参数无效");}
    });
   }
@@ -77,16 +74,14 @@ public class MainActivity extends Activity {
   final JSONObject saved;try{saved=store.secrets();}catch(Exception error){new AlertDialog.Builder(this).setTitle("凭证无法解密").setMessage("手机密钥不可用。可清除应用数据后重新配置；这会删除已保存位置、名单和凭证。").setPositiveButton("知道了",(d,w)->reply(id,null,"凭证未修改")).setOnCancelListener(d->reply(id,null,"已取消")).show();return;}
   ScrollView scroll=new ScrollView(this);LinearLayout layout=new LinearLayout(this);layout.setOrientation(LinearLayout.VERTICAL);int pad=(int)(20*getResources().getDisplayMetrics().density);layout.setPadding(pad,pad,pad,pad);scroll.addView(layout);
   TextView note=new TextView(this);note.setText("可留空使用匿名查询。仅填写本人合法持有的凭证，不会读取微信或电脑配置。凭证使用手机密钥加密保存，不随诊断导出。空白保留旧值，勾选下方可删除全部。\n查询请保持应用在前台，退出或被系统回收可能中断。首次运行建议更新 Android System WebView。");layout.addView(note);
-  EditText silk=field(layout,"小蚕 Silk ID（成对填写）",saved.optString("XC_SILK_ID",""),false),user=field(layout,"小蚕 User ID",saved.optString("XC_USER_ID",""),false),token=field(layout,"歪麦 Token"+(saved.optString("WM_TOKEN").isEmpty()?"（未设置）":"（已保存，空白保留）"),"",true);
+  EditText silk=field(layout,"小蚕 Silk ID（成对填写）",saved.optString("XC_SILK_ID",""),false),user=field(layout,"小蚕 User ID",saved.optString("XC_USER_ID",""),false);
   CheckBox clear=new CheckBox(this);clear.setText("删除全部已保存凭证，恢复匿名模式");layout.addView(clear);
   AlertDialog dialog=new AlertDialog.Builder(this).setTitle("手机凭证设置").setView(scroll).setPositiveButton("保存",null).setNegativeButton("取消",(d,w)->reply(id,null,"已取消，凭证未修改")).setOnCancelListener(d->reply(id,null,"已取消，凭证未修改")).create();dialog.setOnShowListener(d->dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v->{try{
-   JSONObject next=new JSONObject();if(!clear.isChecked()){
+   JSONObject next=clear.isChecked()?new JSONObject():new JSONObject(saved.toString());if(!clear.isChecked()){
     String a=silk.getText().toString().trim(),b=user.getText().toString().trim();if(a.isEmpty())a="0";if(b.isEmpty())b="0";
     if(!a.matches("0|[1-9][0-9]{0,11}")||!b.matches("0|[1-9][0-9]{0,11}")||a.equals("0")!=b.equals("0"))throw new IllegalArgumentException("小蚕 ID 须为成对的最多 12 位数字；留空即匿名");
-    String t=token.getText().toString().trim();if(t.isEmpty())t=saved.optString("WM_TOKEN");
-    if(!t.isEmpty()&&!t.matches("[!-~]{1,4096}"))throw new IllegalArgumentException("凭证格式无效，请只填写凭证值，不要粘贴完整请求");
-    next.put("XC_SILK_ID",a).put("XC_USER_ID",b).put("WM_TOKEN",t);
-   }store.saveSecrets(next);wm=null;wmSession=null;token.setText("");dialog.dismiss();Toast.makeText(this,"已保存到手机，下次查询生效",Toast.LENGTH_LONG).show();reply(id,true,null);
+    next.put("XC_SILK_ID",a).put("XC_USER_ID",b);
+   }store.saveSecrets(next);dialog.dismiss();Toast.makeText(this,"已保存到手机，下次查询生效",Toast.LENGTH_LONG).show();reply(id,true,null);
   }catch(IllegalArgumentException error){Toast.makeText(this,error.getMessage(),Toast.LENGTH_LONG).show();}catch(Exception error){Toast.makeText(this,"保存失败，请检查手机剩余空间",Toast.LENGTH_LONG).show();}}));dialog.show();
  }
  private void locate(String id){if(locationRequest!=null){reply(id,null,"定位已经在进行中");return;}locationRequest=id;

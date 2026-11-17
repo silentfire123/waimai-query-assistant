@@ -407,7 +407,7 @@ test('重启恢复中断查询为失败提示，不永久 busy 且保留结果',
 
 test('诊断在服务重启后仍可导出最近查询，结果与位置分别保存',async t=>{
  const app=await setup(t,{collect:async()=>data()});await app.post('/api/location',location);await app.post('/api/query');await app.done();
- const first=await (await fetch(app.base+'/api/diagnostics')).json();assert.ok(first.queryId);assert.equal(typeof first.config.hasWmToken,'boolean');assert.equal(typeof first.config.hasAmapKey,'boolean');assert.equal(first.config.publicMode,false);
+ const first=await (await fetch(app.base+'/api/diagnostics')).json();assert.ok(first.queryId);assert.equal(first.config.hasWmToken,undefined);assert.equal(typeof first.config.hasAmapKey,'boolean');assert.equal(first.config.publicMode,false);
  const restarted=await createApp({dataDir:app.dir});await new Promise(r=>restarted.listen(0,'127.0.0.1',r));t.after(()=>new Promise(r=>{restarted.close(r);restarted.closeAllConnections();}));
  const diagnostic=await (await fetch('http://127.0.0.1:'+restarted.address().port+'/api/diagnostics')).json();assert.equal(diagnostic.queryId,first.queryId);
 });
@@ -424,7 +424,7 @@ test('尚无查询时诊断明确404而非下载空对象',async t=>{const app=a
 
 test('桌面默认20页；全部失败保留旧结果并留存本次实际采集统计',async t=>{
  let blocked=false,received;
- const pagination={full:{plannedPages:20,requests:1,stores:0,stopReason:'auth_required',partial:true},ratio:{plannedPages:20,requests:0,stores:0,stopReason:'auth_required',partial:true},waimai:{plannedPages:2,requests:1,stores:0,stopReason:'error',partial:true}};
+ const pagination={full:{plannedPages:20,requests:1,stores:0,stopReason:'auth_required',partial:true},ratio:{plannedPages:20,requests:0,stores:0,stopReason:'auth_required',partial:true}};
  const app=await setup(t,{collect:async pages=>{received=pages;return blocked?{source:'live',full:[],ratio:[],errors:[{source:'full',message:'合成鉴权失败'}],coverage:[],pagination}:data();}});
  await app.post('/api/location',location);await app.post('/api/query');const prior=await app.done();assert.equal(received,20);
  blocked=true;await app.post('/api/query');const next=await app.done();assert.deepEqual(next.report,prior.report);assert.deepEqual(next.attempt.pagination,pagination);

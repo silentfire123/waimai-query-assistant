@@ -1,11 +1,11 @@
 import {collectAll} from '../../collector.mjs';
-import {buildReport,demoReport,searchLocations} from '../../core.mjs';
+import {buildReport,demoReport,searchLocations,projectXiaochanSnapshot} from '../../core.mjs';
 import {toGcj02} from '../../location.mjs';
 import {readResourceJson} from '../../platform.mjs';
 import {diagnosticSummary} from '../../diagnostic-core.mjs';
 
 // Same caller-facing routes as the desktop UI, but no HTTP server, port, or cloud.
-export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collect=collectAll,search=searchLocations,clock=Date.now,cooldownMs=10000}) {
+export function createMobileApp({storage,uuid,codeVersion,collect=collectAll,search=searchLocations,clock=Date.now,cooldownMs=10000}) {
  let saved=storage.read()??{};
  if(saved.version!=null&&saved.version!==1)throw Error('手机缓存版本不兼容，请先备份或清除应用数据');
  let location=saved.location??null,snapshot=saved.snapshot??{report:null,attempt:null},diagnostic=saved.diagnostic??null;
@@ -13,7 +13,7 @@ export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collec
  const keyOf=loc=>loc?JSON.stringify([loc.lat,loc.lng,loc.adcode]):null;
  const persist=()=>storage.write({version:1,location,snapshot,diagnostic,nextAllowedAt});
  if(snapshot.attempt?.status==='running'){snapshot={...snapshot,attempt:{...snapshot.attempt,status:'blocked',errors:[{source:'query',message:'上次查询被系统中断，请在前台手动重试；已保存的结果保留'}]}};nextAllowedAt=clock()+cooldownMs;persist();}
- const state=()=>structuredClone({codeVersion,location,locationKey:keyOf(location),...snapshot,busy,progress,nextAllowedAt,csrfToken:'phone-local',resultMatchesLocation:!!location&&snapshot.report?.context?.locationKey===keyOf(location)});
+ const state=()=>structuredClone({codeVersion,location,locationKey:keyOf(location),...projectXiaochanSnapshot(snapshot),busy,progress,nextAllowedAt,csrfToken:'phone-local',resultMatchesLocation:!!location&&snapshot.report?.context?.locationKey===keyOf(location)});
  function validate(value){
   if(!value||typeof value!=='object'||Array.isArray(value))throw Error('请填写查询位置');
   if(typeof value.label!=='string'||!value.label.trim()||value.label.trim().length>60)throw Error('位置名称需为 1–60 个字符');
@@ -28,7 +28,7 @@ export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collec
   try{data=await collect(pages,{location:chosen,log:message=>{progress=message;}});const report={...buildReport(data),context};snapshot.attempt={status:report.status,generatedAt:report.generatedAt,context,errors:report.errors,pagination:report.pagination};if(report.status!=='blocked')snapshot.report=report;}
   catch{snapshot.attempt={status:'blocked',generatedAt:new Date(clock()).toISOString(),context,errors:[{source:'query',message:'本轮查询失败，请检查网络、位置或手机凭证设置；上次名单保留'}]};}
   finally{
-   diagnostic=diagnosticSummary({...data,config:{hasWmToken:!!config().hasWmToken,hasAmapKey:false,publicMode:false},queryId:context.queryId,codeVersion,pages,durationMs:clock()-started,status:snapshot.attempt.status,errors:snapshot.attempt.errors});
+   diagnostic=diagnosticSummary({...data,config:{hasAmapKey:false,publicMode:false},queryId:context.queryId,codeVersion,pages,durationMs:clock()-started,status:snapshot.attempt.status,errors:snapshot.attempt.errors});
    busy=false;progress='';nextAllowedAt=clock()+cooldownMs;
    try{persist();}catch{snapshot.attempt.persistenceError='结果未能保存到手机，退出应用后可能丢失，请检查剩余空间';}
   }
@@ -36,7 +36,7 @@ export function createMobileApp({storage,uuid,codeVersion,config=()=>({}),collec
  return {isBusy:()=>busy||locating,async request(route,value){
   if(route==='/api/state')return state();
   if(route==='/api/demo')return demoReport();
-  if(route==='/api/diagnostics'){if(!diagnostic)throw Error('尚无查询诊断，请先手动完成一次查询');return structuredClone(diagnostic);}
+  if(route==='/api/diagnostics'){if(!diagnostic)throw Error('尚无查询诊断，请先手动完成一次查询');return diagnosticSummary(diagnostic);}
   if(route==='/api/import-location')throw Error('手机不读取电脑旧配置，请搜索地址选点');
   if(route==='/api/location'){
    if(busy)throw Error('正在查询，请稍后再修改位置');const next=validate(value),old=location;location=next;try{persist();}catch(error){location=old;throw error;}return state();

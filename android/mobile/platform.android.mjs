@@ -16,4 +16,3 @@ export async function fetchUpstream(url,options={}) {
  const result=await nativeCall('http',{url:String(url),method:options.method||'GET',headers:options.headers||{},body:options.body||''});
  return {ok:result.status>=200&&result.status<300,status:result.status,text:async()=>result.body,json:async()=>JSON.parse(result.body),headers:{get:name=>result.headers?.[name.toLowerCase()]??null}};
 }
-export async function createWaimaiClient(location){const session=await nativeCall('wmInit',{location});return cursor=>nativeCall('wmPage',{session,cursor});}

@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { buildReport, demoReport, searchLocations } from './poc.mjs';
 
 import { collectAll } from './collector.mjs';
+import { projectXiaochanSnapshot } from './core.mjs';
 import { reverseLocation } from './location.mjs';
 import { diagnosticSummary, saveDiagnostic } from './diagnostics.mjs';
 const root = path.dirname(fileURLToPath(import.meta.url));
@@ -44,14 +45,14 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(ro
     const prior = await readJson(path.join(root, 'output/live/result.json'), null);
     if (prior?.source === 'live') snapshot.report = { ...prior, context: { locationLabel: '旧 PoC 已选位置（尚未关联当前设置）', locationKey: null } };
   }
-  const codeVersion = crypto.createHash('sha256').update((await Promise.all(['core.mjs','platform.mjs','waimai-client.node.mjs','diagnostic-core.mjs','server.mjs','poc.mjs','waimai.mjs','collector.mjs','diagnostics.mjs','location.mjs','web/app.js','web/calculator.mjs','cities.json','web/index.html','web/style.css'].map(name=>fs.readFile(path.join(root,name))))).map(b=>b.toString()).join('')).digest('hex').slice(0,12);
+  const codeVersion = crypto.createHash('sha256').update((await Promise.all(['core.mjs','platform.mjs','diagnostic-core.mjs','server.mjs','poc.mjs','collector.mjs','diagnostics.mjs','location.mjs','web/app.js','web/calculator.mjs','cities.json','web/index.html','web/style.css'].map(name=>fs.readFile(path.join(root,name))))).map(b=>b.toString()).join('')).digest('hex').slice(0,12);
   let latestDiagnostic = null, locationNextAt=0;
   try {const dir=path.join(dataDir,'query-diagnostics');const names=(await fs.readdir(dir)).filter(n=>n.endsWith('.json')).sort().reverse();if(names[0])latestDiagnostic=await readJson(path.join(dir,names[0]),null);} catch { /* 最近诊断缺失不影响启动。 */ }
   if(snapshot.attempt?.status==='running') snapshot.attempt={...snapshot.attempt,status:'blocked',errors:[{source:'query',message:'服务曾在查询中重启，请手动重试；上次结果保留'}]};
   const token = crypto.randomBytes(24).toString('hex');
   let busy = false, settingsBusy = false, progress = '', nextAllowedAt = 0;
   const keyOf = loc => loc ? crypto.createHash('sha256').update(JSON.stringify([loc.lat, loc.lng, loc.adcode])).digest('hex') : null;
-  const state = () => ({ codeVersion, location: settings.location, locationKey: keyOf(settings.location), ...snapshot, busy, progress, nextAllowedAt, csrfToken: token, resultMatchesLocation: !!settings.location && snapshot.report?.context?.locationKey === keyOf(settings.location) });
+  const state = () => ({ codeVersion, location: settings.location, locationKey: keyOf(settings.location), ...projectXiaochanSnapshot(snapshot), busy, progress, nextAllowedAt, csrfToken: token, resultMatchesLocation: !!settings.location && snapshot.report?.context?.locationKey === keyOf(settings.location) });
   async function body(req) {
     if (!(req.headers['content-type'] ?? '').startsWith('application/json')) throw fail(415, '请求需使用 JSON');
     let raw = '';
@@ -77,7 +78,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(ro
       }
       const url = new URL(req.url, `http://${expectedHost}`);
       if (req.method === 'GET' && url.pathname === '/api/state') return send(200, state());
-      if (req.method === 'GET' && url.pathname === '/api/diagnostics') {if(!latestDiagnostic)throw fail(404,'尚无查询诊断，请先手动完成一次查询');res.setHeader('Content-Disposition','attachment; filename=diagnostic.json');return send(200,latestDiagnostic);}
+      if (req.method === 'GET' && url.pathname === '/api/diagnostics') {if(!latestDiagnostic)throw fail(404,'尚无查询诊断，请先手动完成一次查询');res.setHeader('Content-Disposition','attachment; filename=diagnostic.json');return send(200,diagnosticSummary(latestDiagnostic));}
       if (req.method === 'GET' && url.pathname === '/api/demo') return send(200, await demoReport());
       if (req.method === 'POST') {
         if (req.headers.origin && req.headers.origin !== (cloudOrigin || `http://${expectedHost}`)) throw fail(403, '不接受其他网页发起的操作');
@@ -134,7 +135,7 @@ export async function createApp({ dataDir = process.env.DATA_DIR || path.join(ro
               snapshot.attempt = { status: 'blocked', generatedAt: new Date().toISOString(), context, errors: [{ source: 'query', message: error.name === 'TimeoutError' ? '接口请求超时，请稍后重试' : String(error.message).slice(0, 300) }] };
             }
             try {
-              latestDiagnostic=diagnosticSummary({...diagnosticData,config:{hasWmToken:!!process.env.WM_TOKEN,hasAmapKey:!!process.env.AMAP_KEY,publicMode:!!cloudOrigin},queryId:context.queryId,codeVersion,pages,durationMs:Date.now()-started,status:snapshot.attempt.status,errors:snapshot.attempt.errors});
+              latestDiagnostic=diagnosticSummary({...diagnosticData,config:{hasAmapKey:!!process.env.AMAP_KEY,publicMode:!!cloudOrigin},queryId:context.queryId,codeVersion,pages,durationMs:Date.now()-started,status:snapshot.attempt.status,errors:snapshot.attempt.errors});
               await saveDiagnostic(path.join(dataDir,'query-diagnostics'),latestDiagnostic);
             } catch { /* 诊断失败不影响业务及 busy 释放。 */ }
             try { await writeJson(stateFile, snapshot); }

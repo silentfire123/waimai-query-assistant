@@ -3,7 +3,6 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-export { createWaimaiClient } from './waimai-client.node.mjs';
 const root = path.dirname(fileURLToPath(import.meta.url));
 export const md5 = value => crypto.createHash('md5').update(value).digest('hex');
 export const randomUUID = () => crypto.randomUUID();

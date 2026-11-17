@@ -471,3 +471,19 @@
 .disclosure-toggle::after{content:'展开详情'}
 details[open]>summary>.disclosure-toggle::after{content:'收起详情'}
 button:disabled{cursor:not-allowed}
+
+/* 单渠道活动分区；复用纸面与绿色操作的既有界面。 */
+.query-summary{margin:16px 0;color:var(--ink);line-height:1.8;font-size:14px}
+.activity-groups{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:24px;margin:18px 0}
+.activity-group{min-width:0}
+.activity-group h4{display:flex;align-items:baseline;gap:12px;margin:0 0 10px;font-size:14px}
+.activity-group h4 span{font-size:12px;color:var(--muted);font-weight:400}
+.activity-group .activities{padding:0;margin:0;list-style:none}
+.activity-group li+li{margin-top:14px;padding-top:14px;border-top:1px solid var(--line)}
+.activity-group p{margin:0;line-height:1.8;overflow-wrap:anywhere}
+.activity-group .activity-time{margin-top:5px;font-size:13px;color:var(--accent);font-variant-numeric:tabular-nums}
+.activity-detail{font-size:12px;color:var(--muted)}
+.more-activities{margin-top:10px;font-size:13px}
+.more-activities summary{cursor:pointer;color:var(--accent);padding:4px 0}
+.more-activities[open] summary{margin-bottom:10px}
+@media(max-width:640px){.activity-groups{grid-template-columns:1fr;gap:18px}.activity-group+.activity-group{padding-top:16px;border-top:1px solid var(--line)}}
