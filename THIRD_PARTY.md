@@ -1,6 +1,12 @@
 # 第三方参考
 
-## 2026-11-17 比例返 feed 适配（未发布）
+## 2026-11-17 当前修复：Referer及实测接口组合
+
+请求头参照`lyrric/xiaochan`提交`3eb3bd3db73993345b2548b17a3cf554368553ec`的Referer格式（wx52ae＋8位十六进制后缀）。本机单变量A/B确认旧固定值403、新格式200、旧值复测403；生产每次生成新后缀，未复制作者身份或更改UA。Node和Java HTTPS匿名查询均取得真实数据，具体WAF规则不可见，不承诺永久可用。
+
+该参考的统一feed比例返在本次匿名实测只有status，不能按空列表处理；专用`GetMeiTuanPromotions`返回list/pv_id，因此恢复此生产路径。下节的统一feed迁移为前一阶段记录，已由真实响应纠正；详见[修复证据](docs/waf-recovery-2026-11-17.md)。
+
+## 2026-11-17 前一阶段：比例返 feed 适配（已撤回生产迁移）
 
 本次核对固定参考后端 `a90b9adbd46835aa65cf4a3369f8beddd5bff23b`：比例返已与满返共用 `FusionService.GetFeedPromotions`，使用 `rebate_type:2`、`store_platforms:[1]`、offset/number 和 `page_pv_id`；解析 source 5，并从最后一个含活动的条目取得下一页游标。当前源码已同步这些公开协议字段；保留满返 source 2、稳定查询会话、匿名／本人标识边界和 WAF 停止机制。不复制作者固定用户 ID、随机身份、随机 UA/Referer 或代理重试。无新增依赖。
 

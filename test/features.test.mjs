@@ -170,7 +170,7 @@ test('旧位置行政代码：咸阳辖区查询使用地级市而非区县名',
 
 test('小蚕二十页成功路径：两类各20次且第20页门店保留',async t=>{
  const {queryLive,compare}=await import('../poc.mjs'),original=globalThis.fetch,counts={full:0,ratio:0};t.after(()=>{globalThis.fetch=original;});
- globalThis.fetch=async(_url,opts)=>{const kind=JSON.parse(opts.body).rebate_type===1?'full':'ratio',page=++counts[kind];return Response.json(kind==='full'?{feed_items:Array.from({length:20},()=>({source:1,store_platform:1,store:{id:'f'+page,name:'满返店'+page},promotion_id:'p'+page,order_money:3000,user_rebate:1000,left_number:2}))}:{feed_items:[{source:5,name:'比例店'+page,wm_poi_id:'r'+page,plan_activity_info_list:[{ratio:600,max_commission:1000,inventory:2}],page_pv_id:'cursor-'+page}]});};
+ globalThis.fetch=async(_url,opts)=>{const kind=opts.headers.methodname==='FusionService.GetFeedPromotions'?'full':'ratio',page=++counts[kind];return Response.json(kind==='full'?{feed_items:Array.from({length:20},()=>({source:1,store_platform:1,store:{id:'f'+page,name:'满返店'+page},promotion_id:'p'+page,order_money:3000,user_rebate:1000,left_number:2}))}:{list:[{name:'比例店'+page,wm_poi_id:'r'+page,plan_activity_info_list:[{ratio:600,max_commission:1000,inventory:2}]}],pv_id:'cursor-'+page});};
  const result=await queryLive(20,{location:{lat:30,lng:110,adcode:110101},log:()=>{}}),report=compare(result.full,result.ratio);assert.deepEqual(counts,{full:20,ratio:20});assert.equal(report.counts.fullStores,20);assert.equal(report.counts.ratioStores,20);assert.ok(report.fullStores.some(s=>s.name==='满返店20'));assert.ok(report.ratioStores.some(s=>s.name==='比例店20'));assert.equal(result.pagination.full.stopReason,'page_limit');assert.equal(result.pagination.ratio.stopReason,'page_limit');
 });
 
