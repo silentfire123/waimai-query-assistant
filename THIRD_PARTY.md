@@ -1,5 +1,11 @@
 # 第三方参考
 
+## 2026-11-17 比例返 feed 适配（未发布）
+
+本次核对固定参考后端 `a90b9adbd46835aa65cf4a3369f8beddd5bff23b`：比例返已与满返共用 `FusionService.GetFeedPromotions`，使用 `rebate_type:2`、`store_platforms:[1]`、offset/number 和 `page_pv_id`；解析 source 5，并从最后一个含活动的条目取得下一页游标。当前源码已同步这些公开协议字段；保留满返 source 2、稳定查询会话、匿名／本人标识边界和 WAF 停止机制。不复制作者固定用户 ID、随机身份、随机 UA/Referer 或代理重试。无新增依赖。
+
+协议版本仍为 `3.21.7.82`。匿名单页实测仍为 WAF 403，未取得新协议线上业务响应；离线回归不证明恢复真实可用性。下文为各历史阶段的核对记录，详见 [当前排查](docs/diagnosis-xiaochan-2026-11-17.md)。
+
 小蚕接口协议参照以下公开项目读取并核对（2026-11-04）：
 
 - 项目：https://github.com/lyrric/xiaochan

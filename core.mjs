@@ -1,10 +1,10 @@
 // 只读采集与比对核心（兼容原 PoC CLI）: 小蚕美团比例返 × 小蚕美团实付满返。Node.js 20+，无依赖。
-// 协议依据：lyrric/xiaochan main 的 XiaochanHttp.java（2026-11-04 核对）；不使用作者身份。
+// 协议依据：lyrric/xiaochan a90b9ad 的 XiaochanHttp.java（2026-11-17 核对）；不使用作者身份。
 import { md5, randomUUID, getConfig, readLegacyLocation, readResourceJson, fetchUpstream as fetch } from './platform.mjs';
 
 const VERSION = '3.21.7.82';
 const FEED_METHOD = 'FusionService.GetFeedPromotions';
-const RATIO_METHOD = 'FusionService.GetMeiTuanPromotions';
+const RATIO_METHOD = FEED_METHOD;
 const PAGE_SIZE = 20;
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const normalize = value => String(value ?? '').normalize('NFKC').toLowerCase().replace(/[\s·・、，,。._/\\|—-]+/g, '');
@@ -183,13 +183,13 @@ export async function queryLive(pages=20, { location, log = console.log, pause=s
   const auth = identity();
   // 满返分页依赖会话上下文；逐请求更换会话会重新返回首批门店。
   const sessionId = randomUUID();
-  log(auth.mode === 'anonymous' ? '新版协议（满返 feed + 比例返专用接口）；匿名验证（不代表已登录），本轮最多各查询 '+pages+' 页。' : '新版协议；仅使用本地提供的本人标识，完整登录态仍未验证。');
+  log(auth.mode === 'anonymous' ? '统一 feed 协议；匿名验证（不代表已登录），本轮最多各查询 '+pages+' 页。' : '统一 feed 协议；仅使用本地提供的本人标识，完整登录态仍未验证。');
   const full = [], ratio = [], errors = [], coverage = [];
   const pagination = Object.fromEntries(['full','ratio'].map(kind=>[kind,{ plannedPages: pages, requests: 0, uniquePages: 0, duplicatePages: 0,
     rawItems: 0, classifiedItems: 0, eligibleActivities: 0, filteredActivities: 0, schemaRejectedItems: 0, excludedProductItems: 0, stores: 0,
     retainedSoldOut:0, retainedUnknownInventory:0, pages: [], stopReason: 'not_requested', partial:true,
-    ordering:'upstream_unverified', platformFilter:kind==='full'?'is_show_mt:true + local store_platform:1':'meituan_endpoint', categoryFilter:kind==='full'?'rebate_type:1':'meituan_ratio_endpoint' }]));
-  coverage.push('小蚕上游距离排序及独占美团筛选未核实：满返沿用 sort:1、is_show_mt:true、rebate_type:1 并本地校验美团；比例返使用美团专用接口。未做本地重排冒充距离优先。');
+    ordering:'upstream_unverified', platformFilter:'store_platforms:[1] + local source/platform validation', categoryFilter:kind==='full'?'rebate_type:1':'rebate_type:2' }]));
+  coverage.push('小蚕两类使用统一 feed，按 rebate_type:1/2 分别分页并请求 store_platforms:[1]。沿用 sort:1，其距离语义及平台筛选实时效果未核实；保留本地分类校验，未做本地重排冒充距离优先。');
   let gatewayBlocked = false;
   for (const kind of ['full', 'ratio']) {
     let pagePvId = null, stopped = false, noProgressPages = 0;
@@ -199,19 +199,16 @@ export async function queryLive(pages=20, { location, log = console.log, pause=s
     for (let page = 0; page < pages; page++) {
       try {
         log(`${kind === 'full' ? '美团实付满返' : '美团比例返'}：查询第 ${page + 1} 页…`);
-        const listKey = kind === 'full' ? 'feed_items' : 'list';
+        const listKey = 'feed_items';
         const method = kind === 'full' ? FEED_METHOD : RATIO_METHOD;
-        const body = kind === 'full' ? {
+        const body = {
           lat: Number(addr.lat), lon: Number(addr.lng), number: PAGE_SIZE, silk_id: Number(auth.silk),
           sort: 1, offset: page * PAGE_SIZE, app_id: '20', scene: 1, is_show_mt: true,
-          page_pv_id: pagePvId, rebate_type: 1,
-        } : {
-          lat: Number(addr.lat), lon: Number(addr.lng), silk_id: Number(auth.silk),
-          pv_id: pagePvId, scene: 1, app_id: 20,
+          page_pv_id: pagePvId, rebate_type: kind === 'full' ? 1 : 2, store_platforms: [1],
         };
         const pageStarted=Date.now();
         stats.requests++;
-        const json = await call('SilkwormFusion', method, body, kind === 'full' ? Number(addr.adcode) : null, auth, listKey, sessionId);
+        const json = await call('SilkwormFusion', method, body, Number(addr.adcode), auth, listKey, sessionId);
         const items = json[listKey];
         const pageKey = JSON.stringify(items);
         const duplicateContent = seenPages.has(pageKey);
@@ -221,8 +218,7 @@ export async function queryLive(pages=20, { location, log = console.log, pause=s
           const detail = items.map(item => `${item.storeName}：缺少${item.missingFields.join('、')}${item.rebate == null ? '' : `（已知返现 ¥${item.rebate}）`}`).join('；');
           errors.push({ source: kind, code: 'INVALID_FEED_ITEMS', items,
             message: `第 ${page + 1} 次响应有 ${count} 条活动信息不全，未纳入比对。${detail}。其余名单仍可查看，重合结论可能漏项。` });
-        } }) : items;
-        if (kind === 'ratio' && converted.some(p => !p || !p.name || !Array.isArray(p.plan_activity_info_list))) throw new Error('比例返列表缺少 name 或 plan_activity_info_list，不能当成空名单');
+        } }) : feedItems(items, kind);
         const rows = kind === 'full' ? fullRows(converted) : ratioRows(converted);
         const activityCount = kind === 'full' ? converted.length : converted.reduce((sum, p) => sum + p.plan_activity_info_list.length, 0);
         const previousStores = stats.stores;
@@ -233,7 +229,8 @@ export async function queryLive(pages=20, { location, log = console.log, pause=s
           output.push(...converted);
         }
         stats.stores = groupStores(kind === 'full' ? fullRows(output) : ratioRows(output)).length;
-        const next = id(kind === 'full' ? json.page_pv_id : json.pv_id);
+        // 参考比例返从最后一条已分类活动读取游标；不要误读其他来源或旧顶层 pv_id。
+        const next = id(kind === 'full' ? json.page_pv_id : converted.filter(p => p.plan_activity_info_list.length).at(-1)?.page_pv_id);
         const pageStats = { request: page + 1, durationMs:Date.now()-pageStarted, rawItems: items.length, classifiedItems: converted.length,
           eligibleActivities: rows.length, filteredActivities: activityCount - rows.length, schemaRejectedItems, excludedProductItems: 0,
           newStores: stats.stores - previousStores, totalStores: stats.stores, duplicateContent,

@@ -73,11 +73,11 @@ test('小蚕默认两类独立20页；歪麦仅一次两页；请求参数不猜
  t.mock.method(globalThis,'fetch',async(_url,options)=>{
   sessions.add(options.headers['X-Session-Id']);const body=JSON.parse(options.body);
   assert.ok(!('onlyAvailable' in body));assert.ok(!('inventory' in body));
-  if(options.headers.methodname==='FusionService.GetFeedPromotions'){
+  if(JSON.parse(options.body).rebate_type===1){
    assert.equal(body.sort,1);assert.equal(body.rebate_type,1);assert.equal(body.is_show_mt,true);assert.equal(body.offset,counts.full*20);counts.full++;
    return Response.json({feed_items:Array.from({length:20},(_,i)=>feed(counts.full+'-'+i)),page_pv_id:'full-'+counts.full});
   }
-  assert.ok(!('sort' in body));counts.ratio++;return Response.json({list:[ratio(counts.ratio)],pv_id:'ratio-'+counts.ratio});
+  assert.equal(body.sort,1);assert.equal(body.rebate_type,2);assert.deepEqual(body.store_platforms,[1]);assert.equal(body.offset,counts.ratio*20);counts.ratio++;return Response.json({feed_items:[{...ratio(counts.ratio),source:5,page_pv_id:'ratio-'+counts.ratio}]});
  });
  const data=await collectAll(undefined,{location,pause:async()=>{},log:()=>{},requestPage:async()=>({code:200,data:{data:[wm('w'+(++counts.wm),2)],scrollPageData:{page:counts.wm}}})});
  assert.deepEqual(counts,{full:20,ratio:20,wm:2});assert.equal(sessions.size,1);
@@ -88,7 +88,7 @@ test('小蚕默认两类独立20页；歪麦仅一次两页；请求参数不猜
 test('小蚕选择10/20页分别生效，一类早停不消耗另一类上限',async t=>{
  for(const pages of [10,20]){
   let fullCalls=0,ratioCalls=0;
-  t.mock.method(globalThis,'fetch',async(_url,options)=>{if(options.headers.methodname==='FusionService.GetFeedPromotions'){fullCalls++;return Response.json({feed_items:[]});}ratioCalls++;return Response.json({list:[ratio(ratioCalls)],pv_id:String(ratioCalls)});});
+  t.mock.method(globalThis,'fetch',async(_url,options)=>{if(JSON.parse(options.body).rebate_type===1){fullCalls++;return Response.json({feed_items:[]});}ratioCalls++;return Response.json({feed_items:[{...ratio(ratioCalls),source:5,page_pv_id:String(ratioCalls)}]});});
   const r=await queryLive(pages,{location,pause:async()=>{},log:()=>{}});assert.equal(fullCalls,1);assert.equal(ratioCalls,pages);assert.equal(r.pagination.full.plannedPages,pages);assert.equal(r.pagination.ratio.plannedPages,pages);t.mock.restoreAll();
  }
 });
@@ -101,7 +101,7 @@ test('小蚕登录/HTTP403立即停止共享网关，跳过类别仍有计划/�
 });
 
 test('小蚕连续无新增即停，不因不断变化的游标无限消耗页数',async t=>{
- let calls=0;t.mock.method(globalThis,'fetch',async(_url,options)=>{if(options.headers.methodname!=='FusionService.GetFeedPromotions')return Response.json({list:[]});calls++;return Response.json({feed_items:Array.from({length:20},()=>feed('same')),page_pv_id:String(calls)});});
+ let calls=0;t.mock.method(globalThis,'fetch',async(_url,options)=>{if(JSON.parse(options.body).rebate_type!==1)return Response.json({feed_items:[]});calls++;return Response.json({feed_items:Array.from({length:20},()=>feed('same')),page_pv_id:String(calls)});});
  const r=await queryLive(20,{location,pause:async()=>{},log:()=>{}});assert.equal(calls,3);assert.equal(r.pagination.full.stopReason,'no_progress');
 });
 

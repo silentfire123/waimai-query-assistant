@@ -11,7 +11,7 @@ test('满返来源：source=2 的美团有效活动进入名单及同名候选�
   const regular = feed('甲');
   const target = feed('乙', { source:2, status:2, platform_promotion_status:1 });
   t.mock.method(globalThis, 'fetch', async (_url, options) => {
-    if (options.headers.methodname === 'FusionService.GetFeedPromotions') return Response.json({ status:{code:0}, feed_items:[
+    if (JSON.parse(options.body).rebate_type === 1) return Response.json({ status:{code:0}, feed_items:[
       regular, target,
       feed('其他平台', { source:2, store_platform:2 }),
       feed('其他平台三', { source:2, store_platform:3 }),
@@ -20,7 +20,7 @@ test('满返来源：source=2 的美团有效活动进入名单及同名候选�
       feed('售罄', { source:2, left_number:0 }),
       feed('无返现', { source:2, user_rebate:0 }),
     ] });
-    return Response.json({ status:{code:0}, list:[{ name:target.store.name, wm_poi_id:'mt-乙',
+    return Response.json({ status:{code:0}, feed_items:[{ source:5, name:target.store.name, wm_poi_id:'mt-乙',
       plan_activity_info_list:[{ ratio:3500, max_commission:1400, inventory:2, plan_activity_type:2 }] }] });
   });
   const data = await queryLive(1, { location, log:()=>{} });

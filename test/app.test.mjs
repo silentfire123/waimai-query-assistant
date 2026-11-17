@@ -116,27 +116,27 @@ test('真实协议边界：满返偏移推进且连续重复无新增时停止',
   const original=globalThis.fetch;let fullCalls=0,ratioCalls=0;const requests=[];
   globalThis.fetch=async(url,opts)=>{
     requests.push(opts);const body=JSON.parse(opts.body);
-    if(opts.headers.methodname==='FusionService.GetFeedPromotions'){fullCalls++;assert.equal(body.rebate_type,1);return Response.json({status:{code:0},feed_items:Array.from({length:20},()=>({source:1,store_platform:1,store:{id:'xc',name:'测试门店'},order_money:3000,user_rebate:1000,left_number:2}))});}
-    ratioCalls++;return Response.json({status:{code:0},list:ratio});
+    if(JSON.parse(opts.body).rebate_type===1){fullCalls++;assert.equal(body.rebate_type,1);return Response.json({status:{code:0},feed_items:Array.from({length:20},()=>({source:1,store_platform:1,store:{id:'xc',name:'测试门店'},order_money:3000,user_rebate:1000,left_number:2}))});}
+    ratioCalls++;return Response.json({status:{code:0},feed_items:ratio.map(p=>({...p,source:5}))});
   };
   t.after(()=>{globalThis.fetch=original;});
   const result=await queryLive(10,{location,log:()=>{}});
-  assert.deepEqual(requests.filter(r=>r.headers.methodname==='FusionService.GetFeedPromotions').map(r=>JSON.parse(r.body).offset),[0,20,40]);
+  assert.deepEqual(requests.filter(r=>JSON.parse(r.body).rebate_type===1).map(r=>JSON.parse(r.body).offset),[0,20,40]);
   assert.equal(fullCalls,3);assert.equal(ratioCalls,1);assert.equal(result.errors.length,0);
   assert.equal(result.coverage.filter(n=>n.includes('内容重复')).length,2);assert.ok(result.coverage.some(n=>n.includes('未提供下一页游标')));assert.equal(requests[0].headers['x-Teemo'],'0');
 });
 test('比例返缺少数组显示错误而非正常空名单', async t => {
   const original=globalThis.fetch;
-  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'?{status:{code:0},feed_items:[]}:{status:{code:0}});
+  globalThis.fetch=async(url,opts)=>Response.json(JSON.parse(opts.body).rebate_type===1?{status:{code:0},feed_items:[]}:{status:{code:0}});
   t.after(()=>{globalThis.fetch=original;});
-  const result=await queryLive(1,{location,log:()=>{}});assert.match(result.errors[0].message,/缺少 list/);
+  const result=await queryLive(1,{location,log:()=>{}});assert.match(result.errors[0].message,/缺少 feed_items/);
 });
 
 const feedStore = key => ({source:1,store_platform:1,store:{id:key,name:'测试店'+key},promotion_id:key,order_money:3000,user_rebate:1000,left_number:2});
 test('有效分页：同一轮保持会话才能取得满返后续门店，每轮独立会话', async t => {
   const original=globalThis.fetch;const sessions=new Map();const firstSessions=[];
   globalThis.fetch=async(url,opts)=>{
-    if(opts.headers.methodname!=='FusionService.GetFeedPromotions')return Response.json({list:[]});
+    if(JSON.parse(opts.body).rebate_type!==1)return Response.json({feed_items:[]});
     const session=opts.headers['X-Session-Id'];const body=JSON.parse(opts.body);
     if(body.offset===0)firstSessions.push(session);
     const next=sessions.get(session)??0;sessions.set(session,next+1);
@@ -149,23 +149,23 @@ test('有效分页：同一轮保持会话才能取得满返后续门店，每�
   assert.notEqual(firstSessions[0],firstSessions[1],'不同查询应有独立会话');
 });
 
-test('有效分页：比例返 pv_id 不变但每页新增门店时继续读取', async t => {
+test('有效分页：比例返 page_pv_id 不变但每页新增门店时继续读取', async t => {
   const original=globalThis.fetch;let calls=0;const inputs=[];
   globalThis.fetch=async(url,opts)=>{
-    if(opts.headers.methodname==='FusionService.GetFeedPromotions')return Response.json({feed_items:[]});
-    inputs.push(JSON.parse(opts.body).pv_id);calls++;
-    return Response.json({list:[{...ratio[0],wm_poi_id:'mt-'+calls}],pv_id:'stable-pv',mt_pv_id:'mt-page-'+calls});
+    if(JSON.parse(opts.body).rebate_type===1)return Response.json({feed_items:[]});
+    inputs.push(JSON.parse(opts.body).page_pv_id);calls++;
+    return Response.json({feed_items:[{...ratio[0],source:5,wm_poi_id:'mt-'+calls,page_pv_id:'stable-pv',mt_pv_id:'mt-page-'+calls}]});
   };
   t.after(()=>{globalThis.fetch=original;});
   const result=await queryLive(4,{location,log:()=>{}});
-  assert.equal(compare(result.full,result.ratio).counts.ratioStores,4,'重复 pv_id 不是末页证据');
+  assert.equal(compare(result.full,result.ratio).counts.ratioStores,4,'重复 page_pv_id 不是末页证据');
   assert.deepEqual(inputs,[null,'stable-pv','stable-pv','stable-pv']);
 });
 
 test('有效分页：重复内容仍推进游标，并区分请求、内容、筛选与新增门店', async t => {
   const original=globalThis.fetch;let calls=0;const inputs=[];
   globalThis.fetch=async(url,opts)=>{
-    if(opts.headers.methodname!=='FusionService.GetFeedPromotions')return Response.json({list:[]});
+    if(JSON.parse(opts.body).rebate_type!==1)return Response.json({feed_items:[]});
     const body=JSON.parse(opts.body);inputs.push(body.page_pv_id);calls++;
     const reachedThird=body.page_pv_id==='cursor-2';
     const items=Array.from({length:17},()=>feedStore(reachedThird?'b':'a'));
@@ -186,9 +186,9 @@ test('有效分页：重复内容仍推进游标，并区分请求、内容、�
 test('有效分页：比例返会话不变且连续两次无新增门店时有界停止', async t => {
   const original=globalThis.fetch;let calls=0;
   globalThis.fetch=async(url,opts)=>{
-    if(opts.headers.methodname==='FusionService.GetFeedPromotions')return Response.json({feed_items:[]});
+    if(JSON.parse(opts.body).rebate_type===1)return Response.json({feed_items:[]});
     calls++;
-    return Response.json({list:[{...ratio[0],picture:'metadata-'+calls}],pv_id:'stable-pv'});
+    return Response.json({feed_items:[{...ratio[0],source:5,picture:'metadata-'+calls,page_pv_id:'stable-pv'}]});
   };
   t.after(()=>{globalThis.fetch=original;});
   const result=await queryLive(5,{location,log:()=>{}});
@@ -201,7 +201,7 @@ test('有效分页：比例返会话不变且连续两次无新增门店时有�
 test('有效分页：单条满返缺失金额不丢弃同页合法门店，报告保留不完整状态', async t => {
   const original=globalThis.fetch;let calls=0;
   globalThis.fetch=async(url,opts)=>{
-    if(opts.headers.methodname!=='FusionService.GetFeedPromotions')return Response.json({list:[]});
+    if(JSON.parse(opts.body).rebate_type!==1)return Response.json({feed_items:[]});
     calls++;const bad=feedStore('unknown');delete bad.user_rebate;
     return Response.json({feed_items:calls===1?[bad,...Array.from({length:19},()=>feedStore('valid'))]:[feedStore('later')]});
   };
@@ -215,9 +215,9 @@ test('有效分页：单条满返缺失金额不丢弃同页合法门店，报�
 
 test('有效分页：单条满返缺少 store 时仍保留同页合法活动', async t => {
   const original=globalThis.fetch;
-  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
+  globalThis.fetch=async(url,opts)=>Response.json(JSON.parse(opts.body).rebate_type===1
     ?{feed_items:[{...feedStore('missing'),store:undefined},feedStore('valid')]}
-    :{list:[]});
+    :{feed_items:[]});
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
   assert.equal(report.counts.fullStores,1);assert.equal(report.status,'partial');
@@ -232,9 +232,9 @@ const productPromotion = (key, overrides = {}) => {
 };
 test('商品活动：无满返门槛的确切返现作为固定返纳入，不用商品价格补门槛', async t => {
   const original=globalThis.fetch;
-  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
+  globalThis.fetch=async(url,opts)=>Response.json(JSON.parse(opts.body).rebate_type===1
     ?{feed_items:[feedStore('valid'),productPromotion('product-a'),productPromotion('product-b')]}
-    :{list:[]});
+    :{feed_items:[]});
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
   assert.deepEqual(report.errors,[],'商品价格不是实付满返门槛，但确切返现金额应保留');
@@ -257,9 +257,9 @@ test('商品活动：商品元数据不是返现资格条件，缺门店或返�
   const missingPrice=productPromotion('no-price');delete missingPrice.store_product.detail.sku_price;
   const unknownType=productPromotion('unknown-type');unknownType.store_product.product_type=99;
   const original=globalThis.fetch;
-  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
+  globalThis.fetch=async(url,opts)=>Response.json(JSON.parse(opts.body).rebate_type===1
     ?{feed_items:[feedStore('valid'),missingStore,missingRebate,damagedMoney,missingProductId,missingPrice,unknownType]}
-    :{list:[]});
+    :{feed_items:[]});
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
   assert.equal(report.status,'partial');assert.equal(report.counts.fullStores,5);
@@ -270,7 +270,7 @@ test('商品活动：商品元数据不是返现资格条件，缺门店或返�
 test('商品活动：有明确实付满返门槛时仍保留，商品价不覆盖门槛', async t => {
   const item={...productPromotion('with-threshold'),order_money:3000};
   const original=globalThis.fetch;
-  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'?{feed_items:[item]}:{list:[]});
+  globalThis.fetch=async(url,opts)=>Response.json(JSON.parse(opts.body).rebate_type===1?{feed_items:[item]}:{feed_items:[]});
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
   assert.deepEqual(report.errors,[]);assert.equal(report.counts.fullStores,1);
@@ -283,7 +283,7 @@ test('固定返：商品 ID 不作为满返准入条件或同店匹配依据', a
     const p=productPromotion('invalid-id-'+index);p.store_product.detail.jump_product_id=value;return p;
   });
   const original=globalThis.fetch;
-  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'?{feed_items:items}:{list:[]});
+  globalThis.fetch=async(url,opts)=>Response.json(JSON.parse(opts.body).rebate_type===1?{feed_items:items}:{feed_items:[]});
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
   assert.equal(report.pagination.full.excludedProductItems,0);
@@ -297,8 +297,8 @@ test('异常明细：报告保留商家名、具体缺失字段及已知返现�
   delete missingRebate.user_rebate;
   const missingStore={...feedStore('missing-store'),store:undefined};
   const original=globalThis.fetch;
-  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
-    ?{feed_items:[feedStore('valid'),missingRebate,missingStore]}:{list:[]});
+  globalThis.fetch=async(url,opts)=>Response.json(JSON.parse(opts.body).rebate_type===1
+    ?{feed_items:[feedStore('valid'),missingRebate,missingStore]}:{feed_items:[]});
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
   const error=report.errors.find(e=>e.code==='INVALID_FEED_ITEMS');
@@ -327,7 +327,7 @@ test('固定返：无实付门槛但返现金额明确时纳入满返名单和�
   const item={...feedStore('fixed'),store:{id:'xc-fixed',name:'测试固定返店'},meituan_poi_id:'mt-1',user_rebate:600};
   delete item.order_money;
   const original=globalThis.fetch;
-  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'?{feed_items:[item]}:{list:ratio});
+  globalThis.fetch=async(url,opts)=>Response.json(JSON.parse(opts.body).rebate_type===1?{feed_items:[item]}:{feed_items:ratio.map(p=>({...p,source:5}))});
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
   assert.deepEqual(report.errors,[]);
@@ -359,8 +359,8 @@ test('固定返：同店不同商品保留多条活动，重复活动去重，�
   const a=productPromotion('same',{store_product:{name:'套餐甲'}});
   const b={...a,store_product:{name:'套餐乙'}};
   const original=globalThis.fetch;
-  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
-    ?{feed_items:[a,a,b,{...productPromotion('sold'),left_number:0}]}:{list:[]});
+  globalThis.fetch=async(url,opts)=>Response.json(JSON.parse(opts.body).rebate_type===1
+    ?{feed_items:[a,a,b,{...productPromotion('sold'),left_number:0}]}:{feed_items:[]});
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
   assert.equal(report.counts.fullStores,2);assert.equal(report.fullStores[0].activities.length,2);
@@ -376,8 +376,8 @@ test('固定返：同店不同商品保留多条活动，重复活动去重，�
 
 test('固定返：布尔、对象、空白等不明确金额不能被转换为有效返现', async t => {
   const original=globalThis.fetch;
-  globalThis.fetch=async(url,opts)=>Response.json(opts.headers.methodname==='FusionService.GetFeedPromotions'
-    ?{feed_items:[true,{},'   ',null,'not-money'].map((value,index)=>productPromotion('bad-'+index,{user_rebate:value}))}:{list:[]});
+  globalThis.fetch=async(url,opts)=>Response.json(JSON.parse(opts.body).rebate_type===1
+    ?{feed_items:[true,{},'   ',null,'not-money'].map((value,index)=>productPromotion('bad-'+index,{user_rebate:value}))}:{feed_items:[]});
   t.after(()=>{globalThis.fetch=original;});
   const report=buildReport(await queryLive(1,{location,log:()=>{}}));
   assert.equal(report.status,'blocked');assert.equal(report.counts.fullStores,0);
