@@ -22,7 +22,7 @@
 
 满返继续 `FusionService.GetFeedPromotions`，比例返继续已实测可用的 `FusionService.GetMeiTuanPromotions`。上游距离排序语义未核实；统一 feed 比例返在此前匿名实测只有状态，未作为生产路径。
 
-源码及本地 APK 版本 1.0.6 / versionCode=9，尚未发布 Release；远端已发布 1.0.5 不含本轮修改。构建、测试与真机边界见 QA.md 和 docs/release-1.0.6.md。
+当前已发布 1.0.6 自用测试版 / versionCode=9，Release 附 APK 和校验文件；1.0.5 不含本轮修改。构建、测试与真机边界见 QA.md 和 docs/release-1.0.6.md。
 
 ## 不做与验收边界
 

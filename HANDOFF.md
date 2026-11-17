@@ -22,6 +22,6 @@
 
 ## 当前交付与后续
 
-本轮 1.0.6 / versionCode=9 为本地构建，尚未推送或发布。验证及产物见 docs/release-1.0.6.md，公开参考及本次时间字段观察见 THIRD_PARTY.md。
+1.0.6 / versionCode=9 已提交、推送并发布自用测试版 Release；标签固定到 `96912eea13d8ea82c715dc1c6ef82eccd3ecb02c`，远端附件下载摘要与本地一致，Windows／Ubuntu CI 通过。验证及产物见 docs/release-1.0.6.md，公开参考及本次时间字段观察见 THIRD_PARTY.md。
 
 后续优先真机覆盖安装与数据保留、原生定位／地址服务、本人正常网络下查询；时段不代表报名或叠加资格。云端或提醒需求需单独确认运行方式与成本。

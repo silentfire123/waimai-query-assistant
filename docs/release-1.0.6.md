@@ -1,6 +1,6 @@
-# 1.0.6 本地测试包
+# 1.0.6 自用测试版
 
-日期：2026-11-17。版本 1.0.6，versionCode=9，codeVersion=`178b054715f9`。本机构建完成，尚未推送或发布 GitHub Release。
+已于 2026-11-17 07:13:08（America/Los_Angeles）发布 [GitHub 1.0.6 自用测试版](https://github.com/silentfire123/waimai-query-assistant/releases/tag/1.0.6)。版本 1.0.6，versionCode=9，codeVersion=`178b054715f9`。标签指向 `96912eea13d8ea82c715dc1c6ef82eccd3ecb02c`；APK和校验文件均已上传，远端下载及附件digest与本地SHA256一致。
 
 ## 用户可见变化
 
@@ -18,6 +18,8 @@
 - 包名保持 `local.waimai.assistant`。证书 SHA256 `5ed8ea8bad085d6edcd61e23821ac97180606444abcb733a1645ccf058137e70`，与 1.0.5 一致，可覆盖安装；不要先卸载或清除应用数据。
 
 ## 已完成验证
+
+- 发布提交的 Windows／Ubuntu GitHub Actions 检查均成功，运行编号44111439380。
 
 - Node 全量125项通过，无失败或跳过。移除了退役歪麦工具、协议与分页测试；新增活动时段、未知与非法时刻、旧混合缓存投影／重启、只请求小蚕及退役资源门禁回归。数量不能直接与旧版153项比较为覆盖率变化。
 - Java、DEX、资源打包、APK v2/v3签名及对齐通过。最终资源门禁确认依赖完整、无私有文件及退役渠道模块。
