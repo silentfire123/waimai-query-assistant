@@ -6,7 +6,7 @@
 
 ## 当前版本
 
-**[1.0.6 自用测试版](https://github.com/silentfire123/waimai-query-assistant/releases/tag/1.0.6) / versionCode=9** 已发布 GitHub Release。此版本移除歪麦渠道，增加活动时段、同店活动分区与查询数量摘要，见 [1.0.6 说明](docs/release-1.0.6.md)。已发布的 1.0.5 不包含这些变更。
+**[1.0.6 自用测试版](https://github.com/silentfire123/waimai-query-assistant/releases/tag/1.0.6) / versionCode=9** 是当前已发布版本。源码已进入 **1.0.7 / versionCode=10** 候选，加入启动时 GitHub Release 更新检查；1.0.7 需要先手动覆盖安装，之后才能从 App 内更新后续版本。1.0.6 的功能说明见 [1.0.6 说明](docs/release-1.0.6.md)。
 
 在上方 Release 的 Assets 下载 `waimai-assistant-1.0.6.apk`，附 `SHA256SUMS.txt`。本地备份位于 `output/android/1.0.6/`。沿用原测试签名，可覆盖安装；不要先卸载或清除应用数据。安装与构建见 [安卓说明](android/README.md)。
 

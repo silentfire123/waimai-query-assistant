@@ -16,12 +16,13 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
+import android.provider.Settings;
 
 public class MainActivity extends Activity {
  private static final String ORIGIN="https://appassets.androidplatform.net";
  private WebView web;private PhoneStore store;private final Handler main=new Handler(Looper.getMainLooper());
  private final ExecutorService worker=Executors.newSingleThreadExecutor();
- private boolean resolvingLocation;private String locationRequest,exportRequest,exportText;private LocationListener locationListener;private final Map<String,Boolean> inFlight=new ConcurrentHashMap<>();
+  private boolean resolvingLocation;private String locationRequest,exportRequest,exportText;private LocationListener locationListener;private final Map<String,Boolean> inFlight=new ConcurrentHashMap<>();private boolean updateCheckStarted,pendingInstall;
  @Override public void onCreate(Bundle state){super.onCreate(state);store=new PhoneStore(this);
   if(Build.VERSION.SDK_INT>=33)getOnBackInvokedDispatcher().registerOnBackInvokedCallback(android.window.OnBackInvokedDispatcher.PRIORITY_DEFAULT,this::handleBack);
   if(WebView.getCurrentWebViewPackage()==null){showFatal("未检测到 Android System WebView，请先在系统中安装或启用它。");return;}
@@ -36,8 +37,15 @@ public class MainActivity extends Activity {
    @Override public void onReceivedSslError(WebView v,android.webkit.SslErrorHandler h,android.net.http.SslError e){h.cancel();}
    @Override public void onReceivedError(WebView v,WebResourceRequest r,WebResourceError e){if(r.isForMainFrame())runOnUiThread(()->showFatal("内置页面加载失败，请重新打开应用或更新 Android System WebView。"));}
   });web.setWebChromeClient(new WebChromeClient(){@Override public void onPermissionRequest(PermissionRequest request){request.deny();}});
-  web.loadUrl(ORIGIN+"/");
+   web.loadUrl(ORIGIN+"/");checkForUpdate();
  }
+  private void checkForUpdate(){if(updateCheckStarted)return;updateCheckStarted=true;UpdateManager.check(this,new UpdateManager.Callback(){@Override public void found(UpdateManager.UpdateInfo info){main.post(()->showUpdateDialog(info));}@Override public void failed(String message){}});}
+  private void showUpdateDialog(UpdateManager.UpdateInfo info){if(isFinishing()||isDestroyed())return;TextView text=new TextView(this);text.setText("当前版本："+currentVersion()+"\n最新版本："+info.versionName+"\n\n"+info.notes);text.setTextSize(16);text.setTextColor(Color.rgb(35,45,40));text.setPadding(36,12,36,12);ScrollView scroll=new ScrollView(this);scroll.addView(text);new AlertDialog.Builder(this).setTitle("发现新版本 "+info.versionName).setView(scroll).setNegativeButton("暂不更新",null).setPositiveButton("立即更新",(dialog,which)->downloadUpdate(info)).show();}
+  private String currentVersion(){try{return getPackageManager().getPackageInfo(getPackageName(),0).versionName;}catch(Exception e){return "未知";}}
+  private void downloadUpdate(UpdateManager.UpdateInfo info){ProgressDialog progress=ProgressDialog.show(this,"正在准备更新","正在下载并校验 APK…",true,false);UpdateManager.download(this,info,new UpdateManager.DownloadCallback(){@Override public void completed(File apk){main.post(()->{progress.dismiss();installOrRequestPermission(apk);});}@Override public void failed(String message){main.post(()->{progress.dismiss();new AlertDialog.Builder(MainActivity.this).setTitle("更新失败").setMessage(message).setPositiveButton("知道了",null).show();});}});}
+  private void installOrRequestPermission(File apk){if(Build.VERSION.SDK_INT>=26&&!getPackageManager().canRequestPackageInstalls()){pendingInstall=true;new AlertDialog.Builder(this).setTitle("需要安装权限").setMessage("请允许本应用安装已校验的新版本 APK。返回应用后会继续安装。").setNegativeButton("取消",(d,w)->pendingInstall=false).setPositiveButton("去设置",(d,w)->{try{startActivity(new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:"+getPackageName())));}catch(Exception e){startActivity(new Intent(Settings.ACTION_SECURITY_SETTINGS));}}).show();return;}startInstall(apk);}
+  private void startInstall(File apk){if(apk==null||!apk.isFile()){new AlertDialog.Builder(this).setTitle("更新文件不存在").setMessage("请重新启动应用检查更新。").setPositiveButton("知道了",null).show();return;}pendingInstall=false;Uri uri=Uri.parse("content://"+UpdateProvider.AUTHORITY+"/apk");Intent intent=new Intent(Intent.ACTION_INSTALL_PACKAGE);intent.setDataAndType(uri,"application/vnd.android.package-archive");intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION|Intent.FLAG_ACTIVITY_NEW_TASK);try{startActivity(intent);}catch(Exception e){new AlertDialog.Builder(this).setTitle("无法打开安装器").setMessage("请在文件管理器中打开更新，或稍后重试。").setPositiveButton("知道了",null).show();}}
+  @Override protected void onResume(){super.onResume();if(pendingInstall&&(Build.VERSION.SDK_INT<26||getPackageManager().canRequestPackageInstalls()))startInstall(UpdateManager.cachedApk(this));}
  private boolean trusted(Uri u){return "https".equals(u.getScheme())&&"appassets.androidplatform.net".equals(u.getHost())&&u.getUserInfo()==null&&(u.getPort()==-1||u.getPort()==443);}
  private WebResourceResponse asset(Uri uri,String method){try{
   String name=uri.getPath();if(!trusted(uri)||!"GET".equals(method)||uri.getQuery()!=null||name==null||!name.matches("/[a-zA-Z0-9._-]*")||name.contains(".."))return denied();
