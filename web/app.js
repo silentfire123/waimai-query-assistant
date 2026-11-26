@@ -112,7 +112,7 @@ function render() {
   $('attempt').setAttribute('role', partialAttempt ? 'status' : 'alert');
   $('attempt').hidden = !errors.length && !attempt?.persistenceError || !!demo;
   const attemptStats = attempt?.pagination ? Object.entries(attempt.pagination).map(([kind,s])=>`${({full:'小蚕满返',ratio:'小蚕比例返'})[kind] || kind}：计划最多 ${s.plannedPages} 页 / 实际请求 ${s.requests} 次 / 有效门店 ${s.stores} 家 / ${s.partial?'部分样本':'上游已结束'} / 停止：${({waf:'上游拦截',auth_required:'要求登录或身份校验',error:'请求失败',page_limit:'达到上限，非全量',empty_page:'空页',upstream_end:'上游明确结束',no_progress:'无新增',missing_cursor:'缺少游标',short_page:'不足一页'})[s.stopReason] || s.stopReason}`).join('；') : '';
-  const attemptText = errors.map(e => `${({full:'小蚕实付满返', ratio:'小蚕比例返', query:'查询'})[e.source] || e.source}：${e.message}${e.upstreamCode ? `（上游业务码 ${esc(e.upstreamCode)}）` : ''}`).join('；') + (attempt?.persistenceError ? '；' + attempt.persistenceError : '') + (errors.length && state.report && attempt?.generatedAt !== state.report.generatedAt ? '。未覆盖上次结果，以下仍为历史名单。' : '');
+  const attemptText = errors.map(e => `${({full:'小蚕实付满返', ratio:'小蚕比例返', query:'查询'})[e.source] || e.source}：${e.message}${e.upstreamCode ? `（上游业务码 ${esc(e.upstreamCode)}）` : ''}${e.upstreamMessage ? `：${esc(e.upstreamMessage)}` : ''}`).join('；') + (attempt?.persistenceError ? '；' + attempt.persistenceError : '') + (errors.length && state.report && attempt?.generatedAt !== state.report.generatedAt ? '。未覆盖上次结果，以下仍为历史名单。' : '');
   const attemptKey = attempt?.context?.queryId ?? attempt?.generatedAt;
   if (attemptNoticeKey !== attemptKey) { $('attempt-details').open = false; attemptNoticeKey = attemptKey; }
   $('attempt-summary').textContent = '部分活动查询失败，名单可能不完整';

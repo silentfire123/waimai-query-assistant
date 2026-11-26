@@ -16,6 +16,7 @@ const amount = value => typeof value === 'number' || (typeof value === 'string' 
 const inventory = value => amount(value) != null && amount(value) >= 0 ? amount(value) : null;
 const inventoryState = value => inventory(value) === 0 ? 'sold_out' : inventory(value) == null ? 'unknown' : 'reported_remaining';
 const escape = value => String(value ?? '—').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const upstreamMessage = value => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/[A-Za-z0-9+/_=-]{24,}/g, '<REDACTED>').replace(/\s+/g, ' ').trim().slice(0, 160);
 
 // 只接纳接口明确返回的活动时刻；营业时间、缺失值和相同时刻不推断成全天。
 function activityTime(row) {
@@ -181,8 +182,9 @@ async function call(service, method, body, city, auth, listKey = 'feed_items', s
   let json;
   try { json = JSON.parse(text); } catch { throw new Error('上游未返回 JSON；未获取到活动数据'); }
   if (json.status?.code != null && Number(json.status.code) !== 0) {
-    const authRequired=/登录|登陆|鉴权|login|unauth|token/i.test(String(json.status.msg ?? ''));
-    throw Object.assign(new Error(authRequired ? '上游要求登录或身份校验，已停止本轮网关请求' : `上游业务错误 ${Number(json.status.code)}，已停止本类别`), {code:authRequired?'UPSTREAM_AUTH':'UPSTREAM_BUSINESS'});
+    const code=Number(json.status.code), reason=upstreamMessage(json.status.msg);
+    const authRequired=/登录|登陆|鉴权|login|unauth|token/i.test(reason);
+    throw Object.assign(new Error(authRequired ? '上游要求登录或身份校验，已停止本轮网关请求' : `上游业务错误 ${code}，已停止本类别`), {code:authRequired?'UPSTREAM_AUTH':'UPSTREAM_BUSINESS',upstreamCode:code,...(!authRequired&&reason?{upstreamMessage:reason}:{})});
   }
   if (!Array.isArray(json[listKey])) throw new Error(`上游缺少 ${listKey} 数组，响应结构需要重新核对`);
   return json;
@@ -278,7 +280,7 @@ export async function queryLive(pages=20, { location, log = console.log, pause=s
           coverage.push(`${kind}：连续两次无新增门店，停止本轮；不代表已全量`); stopped = true; break;
         }
       } catch (e) {
-        errors.push({ source: kind, message: e.message, ...(e.code ? { code: e.code } : {}), ...(e.httpStatus ? { httpStatus: e.httpStatus } : {}) });
+        errors.push({ source: kind, message: e.message, ...(e.code ? { code: e.code } : {}), ...(e.httpStatus ? { httpStatus: e.httpStatus } : {}), ...(Number.isSafeInteger(e.upstreamCode) ? { upstreamCode: e.upstreamCode } : {}), ...(e.upstreamMessage ? { upstreamMessage: e.upstreamMessage } : {}) });
         stats.stopReason = e.code === 'UPSTREAM_WAF' ? 'waf' : e.code === 'UPSTREAM_AUTH' || [401,403].includes(e.httpStatus) ? 'auth_required' : 'error';
         gatewayBlocked = ['waf','auth_required'].includes(stats.stopReason);
         stopped = true;

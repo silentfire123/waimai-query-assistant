@@ -131,6 +131,15 @@ test('比例返缺少数组显示错误而非正常空名单', async t => {
   t.after(()=>{globalThis.fetch=original;});
   const result=await queryLive(1,{location,log:()=>{}});assert.match(result.errors[0].message,/缺少 list/);
 });
+test('上游业务错误保留业务码和脱敏说明，不能冒充空名单', async t => {
+ const original=globalThis.fetch;let ratioCalls=0;
+ globalThis.fetch=async(_url,opts)=>opts.headers.methodname==='FusionService.GetFeedPromotions'
+  ? Response.json({status:{code:0},feed_items:[]})
+  : (++ratioCalls===1?Response.json({status:{code:1,msg:'请求过于频繁 SECRET_TOKEN_123456789012345678901234'}}):Response.json({status:{code:0},list:[]}));
+ t.after(()=>{globalThis.fetch=original;});
+ const result=await queryLive(1,{location,log:()=>{}});const error=result.errors.find(e=>e.source==='ratio');
+ assert.equal(ratioCalls,1);assert.equal(error.code,'UPSTREAM_BUSINESS');assert.equal(error.upstreamCode,1);assert.match(error.upstreamMessage,/请求过于频繁/);assert.ok(!error.upstreamMessage.includes('SECRET_TOKEN'));assert.equal(result.pagination.ratio.stopReason,'error');
+});
 
 const feedStore = key => ({source:1,store_platform:1,store:{id:key,name:'测试店'+key},promotion_id:key,order_money:3000,user_rebate:1000,left_number:2});
 test('有效分页：同一轮保持会话才能取得满返后续门店，每轮独立会话', async t => {
